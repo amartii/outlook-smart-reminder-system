@@ -100,6 +100,25 @@
     </div>
 
     <div id="feedback" class="mt-3" style="display:none"></div>
+
+    <!-- Ayuda de errores comunes -->
+    <div id="errorHelp" class="mt-3" style="display:none">
+      <div class="card border-0 bg-light" style="border-radius:0;font-size:.85rem">
+        <div class="card-body py-3">
+          <div class="fw-bold mb-2">💡 Posibles soluciones</div>
+          <ul class="mb-0 ps-3">
+            <li class="mb-1"><strong>¿Tienes verificación en dos pasos (MFA) activa?</strong><br>
+              Genera una <a href="https://account.microsoft.com/security" target="_blank" class="text-accent">contraseña de aplicación</a>
+              y úsala aquí en lugar de tu contraseña habitual.</li>
+            <li class="mb-1"><strong>¿Error de red / timeout?</strong><br>
+              Tu red corporativa puede bloquear SMTP. Prueba desde una red diferente o WiFi.</li>
+            <li class="mb-1"><strong>¿Sigue fallando en la oficina?</strong><br>
+              Pide a IT que habilite SMTP AUTH para tu buzón:<br>
+              <code style="font-size:.8rem">Set-CASMailbox -Identity "tuemail" -SmtpClientAuthenticationDisabled $false</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
   </form>
 
 </div>
@@ -123,21 +142,29 @@ function getFormData() {
 
 function showFeedback(ok, msg) {
   const el = document.getElementById('feedback');
+  const help = document.getElementById('errorHelp');
   el.style.display = 'block';
-  el.className = ok ? 'alert alert-success' : 'alert alert-danger';
-  el.textContent = msg;
+  el.className = ok === true ? 'alert alert-success' : ok === false ? 'alert alert-danger' : 'alert alert-info';
+  el.innerHTML = msg.replace(/\n/g, '<br>');
+  help.style.display = ok === false ? 'block' : 'none';
 }
 
 async function testConnection() {
   const data = getFormData();
   if (!data.user_email || !data.password) { showFeedback(false, 'Rellena email y contraseña'); return; }
-  showFeedback(null, 'Probando conexión…');
-  document.getElementById('feedback').className = 'alert alert-info';
-  const res = await fetch('/api/outlook/test', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
-  });
-  const json = await res.json();
-  showFeedback(json.ok, json.message);
+  showFeedback(null, '⏳ Probando conexión (puede tardar hasta 30 segundos)…');
+  try {
+    const res = await fetch('/api/outlook/test', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    const json = await res.json();
+    if (json.ok && json.smtp_port && json.smtp_port !== data.smtp_port) {
+      document.getElementById('smtp_port').value = json.smtp_port;
+    }
+    showFeedback(json.ok, json.message);
+  } catch(e) {
+    showFeedback(false, 'Error de red al contactar con el servidor local.');
+  }
 }
 
 document.getElementById('setupForm').addEventListener('submit', async (e) => {
@@ -145,18 +172,20 @@ document.getElementById('setupForm').addEventListener('submit', async (e) => {
   const data = getFormData();
   const btn = e.submitter;
   btn.disabled = true;
-  btn.textContent = 'Conectando…';
+  btn.textContent = '⏳ Conectando (hasta 30s)…';
   try {
     const res = await fetch('/api/outlook/connect', {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
     });
     const json = await res.json();
     if (res.ok) {
-      showFeedback(true, json.message + ' — redirigiendo…');
-      setTimeout(() => window.location.href = '/dashboard', 1200);
+      showFeedback(true, '✓ ' + json.message + ' — redirigiendo al dashboard…');
+      setTimeout(() => window.location.href = '/dashboard', 1500);
     } else {
       showFeedback(false, json.error || 'Error al conectar');
     }
+  } catch(e) {
+    showFeedback(false, 'Error de red al contactar con el servidor local.');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Guardar y conectar';

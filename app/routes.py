@@ -81,7 +81,8 @@ def api_outlook_test():
         password=data["password"].strip(),
     )
     ok, message = svc.validate_connection()
-    return jsonify({"ok": ok, "message": message})
+    # Return the port that actually worked so the UI can update
+    return jsonify({"ok": ok, "message": message, "smtp_port": svc.smtp_port})
 
 
 @main.route("/api/outlook/connect", methods=["POST"])
@@ -105,6 +106,9 @@ def api_outlook_connect():
     if not ok:
         return jsonify({"error": message}), 400
 
+    # svc.smtp_port may have been auto-switched to 465 during validation
+    working_smtp_port = svc.smtp_port
+
     OutlookConnection.query.update({"is_active": False})
     db.session.flush()
     conn = OutlookConnection(
@@ -112,7 +116,7 @@ def api_outlook_connect():
         user_email=email,
         display_name=data.get("display_name", "").strip() or email,
         password_enc=encrypt(password),
-        smtp_host=smtp_host, smtp_port=smtp_port,
+        smtp_host=smtp_host, smtp_port=working_smtp_port,
         imap_host=imap_host, imap_port=imap_port,
         is_active=True,
     )

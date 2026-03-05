@@ -57,21 +57,73 @@ class SMTPService:
         self.password = password
         self.sender_email = sender_email or username
 
+    def _smtp_connect(self):
+        """
+        Open and authenticate an SMTP connection.
+        Tries STARTTLS (port 587) first, then SSL (port 465) as fallback.
+        Updates self.smtp_port to whichever method works.
+        """
+        import socket
+
+        def _try_starttls(port):
+            s = smtplib.SMTP(self.smtp_host, port, timeout=20)
+            s.ehlo()
+            s.starttls()
+            s.ehlo()
+            s.login(self.username, self.password)
+            return s
+
+        def _try_ssl(port):
+            s = smtplib.SMTP_SSL(self.smtp_host, port, timeout=20)
+            s.login(self.username, self.password)
+            return s
+
+        # Build attempt list: try configured port first, then the other
+        if self.smtp_port == 465:
+            attempts = [(465, _try_ssl), (587, _try_starttls)]
+        else:
+            attempts = [(587, _try_starttls), (465, _try_ssl)]
+
+        last_err = None
+        for port, method in attempts:
+            try:
+                conn = method(port)
+                self.smtp_port = port  # remember what worked
+                return conn
+            except smtplib.SMTPAuthenticationError:
+                raise  # don't retry — wrong password
+            except (socket.timeout, ConnectionRefusedError, OSError) as e:
+                last_err = e
+                logger.debug("SMTP %s:%s failed (%s), trying next…", self.smtp_host, port, e)
+                continue
+
+        raise ConnectionError(
+            f"No se pudo conectar a {self.smtp_host} en ningún puerto (587/465). "
+            "Comprueba que:\n"
+            "  1. Tu red/firewall permite conexiones SMTP salientes\n"
+            "  2. SMTP AUTH está habilitado para tu cuenta en Office 365\n"
+            f"  Último error técnico: {last_err}"
+        )
+
     # ── Connection ─────────────────────────────────────────────────────────────
 
     def validate_connection(self):
         """Test SMTP login. Returns (ok: bool, message: str)."""
         try:
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as s:
-                s.ehlo()
-                s.starttls()
-                s.ehlo()
-                s.login(self.username, self.password)
-            return True, f"Conexión SMTP exitosa como {self.sender_email}"
+            s = self._smtp_connect()
+            s.quit()
+            return True, f"Conexión exitosa como {self.sender_email} (puerto {self.smtp_port})"
         except smtplib.SMTPAuthenticationError:
-            return False, "Credenciales incorrectas. Verifica usuario y contraseña/app password."
+            return False, (
+                "Credenciales incorrectas. "
+                "Si tu cuenta tiene verificación en dos pasos activa, genera una "
+                "contraseña de aplicación en account.microsoft.com en lugar de usar "
+                "tu contraseña habitual."
+            )
+        except ConnectionError as exc:
+            return False, str(exc)
         except Exception as exc:
-            return False, f"Error de conexión: {exc}"
+            return False, f"Error inesperado: {exc}"
 
     def _imap_connect(self):
         """Return an authenticated imaplib.IMAP4_SSL connection."""
@@ -105,12 +157,14 @@ class SMTPService:
             msg.attach(MIMEText(body_text, "plain", "utf-8"))
         msg.attach(MIMEText(body_html, "html", "utf-8"))
 
-        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as s:
-            s.ehlo()
-            s.starttls()
-            s.ehlo()
-            s.login(self.username, self.password)
+        s = self._smtp_connect()
+        try:
             s.send_message(msg)
+        finally:
+            try:
+                s.quit()
+            except Exception:
+                pass
 
         message_id = msg["Message-ID"]
         logger.info("Email sent to %s — Message-ID: %s", to_email, message_id)
