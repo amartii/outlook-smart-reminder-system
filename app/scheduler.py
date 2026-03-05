@@ -17,9 +17,8 @@ scheduler = BackgroundScheduler(timezone="UTC")
 
 
 def _build_outlook_service(app):
-    """Build an SMTPService from the active connection. Returns None if not configured."""
+    """Build the right email service from the active connection. Returns None if not configured."""
     from app.models import OutlookConnection
-    from app.smtp_service import SMTPService
     from app.crypto import decrypt
 
     conn = OutlookConnection.query.filter_by(is_active=True).first()
@@ -27,11 +26,17 @@ def _build_outlook_service(app):
         logger.debug("No active connection — skipping job")
         return None
 
+    if conn.backend_type == "delegated":
+        from app.delegated_service import DelegatedGraphService
+        return DelegatedGraphService(conn.id)
+
+    # SMTP fallback (Gmail)
+    from app.smtp_service import SMTPService
     return SMTPService(
-        smtp_host=conn.smtp_host,
-        smtp_port=conn.smtp_port,
-        imap_host=conn.imap_host,
-        imap_port=conn.imap_port,
+        smtp_host=conn.smtp_host or "smtp.gmail.com",
+        smtp_port=conn.smtp_port or 587,
+        imap_host=conn.imap_host or "imap.gmail.com",
+        imap_port=conn.imap_port or 993,
         username=conn.user_email,
         password=decrypt(conn.password_enc),
         sender_email=conn.user_email,

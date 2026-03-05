@@ -2,194 +2,255 @@
 {% block title %}Configuración — Outlook Smart Reminder{% endblock %}
 
 {% block content %}
-<div class="container py-5" style="max-width:520px">
+<div class="container py-5" style="max-width:560px">
 
-  <!-- Header -->
   <div class="mb-5">
-    <p class="text-accent fw-bold mb-1 small text-uppercase tracking-wide">> Configuración inicial</p>
-    <h1 class="fw-black display-6 mb-1">Conectar cuenta<br>de Outlook</h1>
-    <p class="text-muted small">Introduce tus credenciales de Outlook / Office 365.<br>
-      El agente correrá en local y usará tu cuenta para enviar y monitorizar emails.</p>
+    <p class="text-accent fw-bold mb-1 small text-uppercase">> Configuración inicial</p>
+    <h1 class="fw-black display-6 mb-1">Conectar cuenta<br>de correo</h1>
   </div>
 
-  <!-- Status banner si ya hay conexión -->
   {% if connection %}
   <div class="alert-accenture mb-4 d-flex align-items-center gap-3">
     <span style="font-size:1.4rem">✓</span>
     <div>
-      <div class="fw-bold">Cuenta conectada</div>
-      <div class="small text-muted">{{ connection.user_email }}</div>
+      <div class="fw-bold">{{ connection.display_name or connection.user_email }}</div>
+      <div class="small text-muted">{{ connection.user_email }} · {{ connection.backend_type }}</div>
     </div>
     <button class="btn btn-sm btn-outline-danger ms-auto" onclick="disconnect()">Desconectar</button>
   </div>
   {% endif %}
 
-  <!-- Formulario -->
-  <form id="setupForm" autocomplete="off">
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mb-4" id="setupTabs">
+    <li class="nav-item">
+      <button class="nav-link active fw-bold" id="tab-outlook" onclick="switchTab('outlook')">
+        ⊞ Microsoft Outlook
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="tab-gmail" onclick="switchTab('gmail')">
+        ✉ Gmail / otro
+      </button>
+    </li>
+  </ul>
 
-    <div class="mb-4">
-      <label class="form-label fw-bold small text-uppercase">Email de Outlook</label>
-      <input type="email" id="user_email" class="form-control form-control-lg"
-             placeholder="tunombre@empresa.com"
-             value="{{ connection.user_email if connection else '' }}" required>
-      <div class="form-text">La cuenta desde la que se enviarán los emails.</div>
+  <!-- ═══ TAB OUTLOOK ═══ -->
+  <div id="panel-outlook">
+
+    <div class="alert alert-info border-0 mb-4" style="border-radius:0;font-size:.9rem">
+      <strong>¿Por qué necesito un Client ID?</strong><br>
+      Microsoft eliminó la autenticación con usuario/contraseña en 2022.
+      La única forma de acceder a Outlook es con OAuth2. Registrar la app es
+      <strong>gratis</strong> con cualquier cuenta Microsoft y tarda 3 minutos.
+      <a href="#instrucciones" class="text-accent" onclick="document.getElementById('instrucciones').classList.toggle('d-none')">
+        Ver instrucciones ▾
+      </a>
+    </div>
+
+    <div id="instrucciones" class="d-none card border-0 bg-light mb-4 p-3" style="border-radius:0;font-size:.85rem">
+      <ol class="mb-0 ps-3">
+        <li class="mb-2">Abre <a href="https://portal.azure.com" target="_blank" class="text-accent">portal.azure.com</a>
+          e inicia sesión con <strong>cualquier cuenta Microsoft</strong> (puede ser @outlook.com personal)</li>
+        <li class="mb-2">Busca <strong>"App registrations"</strong> → <strong>New registration</strong></li>
+        <li class="mb-2">Name: <em>Outlook Smart Reminder</em> · Supported account types:
+          <strong>"Accounts in any organizational directory and personal Microsoft accounts"</strong></li>
+        <li class="mb-2">Click <strong>Register</strong> → copia el <strong>Application (client) ID</strong></li>
+        <li class="mb-2">Ve a <strong>API permissions</strong> → Add → Microsoft Graph → Delegated:
+          <code>Mail.Send</code>, <code>Mail.ReadWrite</code>, <code>Contacts.Read</code>, <code>User.Read</code>, <code>offline_access</code></li>
+        <li class="mb-2">Ve a <strong>Authentication</strong> → activa <strong>"Allow public client flows"</strong> → Save</li>
+        <li>Pega el Client ID abajo y pulsa <strong>Iniciar sesión</strong></li>
+      </ol>
     </div>
 
     <div class="mb-4">
-      <label class="form-label fw-bold small text-uppercase">Contraseña</label>
-      <div class="input-group">
-        <input type="password" id="password" class="form-control form-control-lg"
-               placeholder="••••••••••••" required>
-        <button class="btn btn-outline-secondary" type="button" onclick="togglePass()">
-          <span id="passIcon">👁</span>
+      <label class="form-label fw-bold small text-uppercase">Application (Client) ID</label>
+      <input type="text" id="client_id" class="form-control form-control-lg"
+             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+      <div class="form-text">Del paso de App registrations en Azure Portal.</div>
+    </div>
+
+    <button class="btn btn-accenture w-100 py-3" onclick="startDeviceFlow()">
+      Iniciar sesión con Microsoft →
+    </button>
+
+    <!-- Device code display -->
+    <div id="deviceCodeBox" class="mt-4 d-none">
+      <div class="card border-0 bg-light p-4 text-center" style="border-radius:0">
+        <p class="mb-2 text-muted small">Abre este enlace en el navegador:</p>
+        <a id="verificationUri" href="#" target="_blank" class="h5 text-accent fw-bold"></a>
+        <p class="mt-3 mb-1 text-muted small">E introduce este código:</p>
+        <div id="userCode" class="display-5 fw-black letter-spacing-wide" style="letter-spacing:.2em"></div>
+        <div class="mt-3">
+          <div class="spinner-border spinner-border-sm text-secondary me-2"></div>
+          <span class="text-muted small">Esperando que inicies sesión…</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="feedbackOutlook" class="mt-3" style="display:none"></div>
+  </div>
+
+  <!-- ═══ TAB GMAIL ═══ -->
+  <div id="panel-gmail" class="d-none">
+
+    <div class="alert alert-info border-0 mb-4" style="border-radius:0;font-size:.9rem">
+      Gmail requiere una <strong>App Password</strong> (contraseña de aplicación).
+      <a href="https://myaccount.google.com/apppasswords" target="_blank" class="text-accent">
+        Generar App Password →
+      </a>
+      <br><span class="text-muted" style="font-size:.8rem">
+        Requiere 2FA activo en la cuenta Google. La App Password son 16 caracteres sin espacios.
+      </span>
+    </div>
+
+    <form id="gmailForm" autocomplete="off">
+      <div class="mb-3">
+        <label class="form-label fw-bold small text-uppercase">Email de Gmail</label>
+        <input type="email" id="gmail_email" class="form-control form-control-lg"
+               placeholder="tunombre@gmail.com" required>
+      </div>
+      <div class="mb-4">
+        <label class="form-label fw-bold small text-uppercase">App Password</label>
+        <div class="input-group">
+          <input type="password" id="gmail_password" class="form-control form-control-lg"
+                 placeholder="xxxxxxxxxxxxxxxxxxxx" required>
+          <button class="btn btn-outline-secondary" type="button"
+                  onclick="this.previousElementSibling.type = this.previousElementSibling.type==='password'?'text':'password'">👁</button>
+        </div>
+      </div>
+      <div class="d-flex gap-2 mb-3">
+        <button type="button" class="btn btn-outline-secondary" onclick="testGmail()">
+          Probar conexión
+        </button>
+        <button type="submit" class="btn btn-accenture flex-grow-1">
+          Guardar y conectar
         </button>
       </div>
-      <div class="form-text">
-        Si tienes verificación en dos pasos activa, genera una
-        <a href="https://account.microsoft.com/security" target="_blank" class="text-accent">
-          contraseña de aplicación
-        </a>
-        y úsala aquí.
-      </div>
-    </div>
-
-    <!-- Configuración avanzada (colapsable) -->
-    <div class="mb-4">
-      <button class="btn btn-link text-muted p-0 small" type="button"
-              data-bs-toggle="collapse" data-bs-target="#advancedConfig">
-        ▸ Configuración avanzada (SMTP / IMAP)
-      </button>
-      <div class="collapse mt-3" id="advancedConfig">
-        <div class="card card-body bg-light border-0" style="border-radius:0">
-          <div class="row g-3">
-            <div class="col-8">
-              <label class="form-label small fw-bold">Servidor SMTP</label>
-              <input type="text" id="smtp_host" class="form-control form-control-sm"
-                     value="smtp.office365.com">
-            </div>
-            <div class="col-4">
-              <label class="form-label small fw-bold">Puerto</label>
-              <input type="number" id="smtp_port" class="form-control form-control-sm" value="587">
-            </div>
-            <div class="col-8">
-              <label class="form-label small fw-bold">Servidor IMAP</label>
-              <input type="text" id="imap_host" class="form-control form-control-sm"
-                     value="outlook.office365.com">
-            </div>
-            <div class="col-4">
-              <label class="form-label small fw-bold">Puerto</label>
-              <input type="number" id="imap_port" class="form-control form-control-sm" value="993">
-            </div>
-          </div>
-          <div class="mt-2 text-muted" style="font-size:.8rem">
-            Los valores por defecto son para Outlook / Office 365.<br>
-            Para Gmail: smtp.gmail.com:587 / imap.gmail.com:993
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Acciones -->
-    <div class="d-flex gap-2">
-      <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">
-        Probar conexión
-      </button>
-      <button type="submit" class="btn btn-accenture flex-grow-1">
-        Guardar y conectar
-      </button>
-    </div>
-
-    <div id="feedback" class="mt-3" style="display:none"></div>
-
-    <!-- Ayuda de errores comunes -->
-    <div id="errorHelp" class="mt-3" style="display:none">
-      <div class="card border-0 bg-light" style="border-radius:0;font-size:.85rem">
-        <div class="card-body py-3">
-          <div class="fw-bold mb-2">💡 Posibles soluciones</div>
-          <ul class="mb-0 ps-3">
-            <li class="mb-1"><strong>¿Tienes verificación en dos pasos (MFA) activa?</strong><br>
-              Genera una <a href="https://account.microsoft.com/security" target="_blank" class="text-accent">contraseña de aplicación</a>
-              y úsala aquí en lugar de tu contraseña habitual.</li>
-            <li class="mb-1"><strong>¿Error de red / timeout?</strong><br>
-              Tu red corporativa puede bloquear SMTP. Prueba desde una red diferente o WiFi.</li>
-            <li class="mb-1"><strong>¿Sigue fallando en la oficina?</strong><br>
-              Pide a IT que habilite SMTP AUTH para tu buzón:<br>
-              <code style="font-size:.8rem">Set-CASMailbox -Identity "tuemail" -SmtpClientAuthenticationDisabled $false</code></li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </form>
+      <div id="feedbackGmail" class="mt-2" style="display:none"></div>
+    </form>
+  </div>
 
 </div>
 
 <script>
-function togglePass() {
-  const inp = document.getElementById('password');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  ['outlook','gmail'].forEach(t => {
+    document.getElementById('panel-' + t).classList.toggle('d-none', t !== tab);
+    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+  });
 }
 
-function getFormData() {
-  return {
-    user_email: document.getElementById('user_email').value.trim(),
-    password:   document.getElementById('password').value,
-    smtp_host:  document.getElementById('smtp_host').value.trim(),
-    smtp_port:  parseInt(document.getElementById('smtp_port').value),
-    imap_host:  document.getElementById('imap_host').value.trim(),
-    imap_port:  parseInt(document.getElementById('imap_port').value),
-  };
-}
+// ── Outlook Device Code Flow ───────────────────────────────────────────────────
+let _pollInterval = null;
+let _deviceCode = null;
 
-function showFeedback(ok, msg) {
-  const el = document.getElementById('feedback');
-  const help = document.getElementById('errorHelp');
+function showFeedbackOutlook(ok, msg) {
+  const el = document.getElementById('feedbackOutlook');
   el.style.display = 'block';
   el.className = ok === true ? 'alert alert-success' : ok === false ? 'alert alert-danger' : 'alert alert-info';
-  el.innerHTML = msg.replace(/\n/g, '<br>');
-  help.style.display = ok === false ? 'block' : 'none';
+  el.innerHTML = (msg || '').replace(/\n/g, '<br>');
 }
 
-async function testConnection() {
-  const data = getFormData();
-  if (!data.user_email || !data.password) { showFeedback(false, 'Rellena email y contraseña'); return; }
-  showFeedback(null, '⏳ Probando conexión (puede tardar hasta 30 segundos)…');
+async function startDeviceFlow() {
+  const client_id = document.getElementById('client_id').value.trim();
+  if (!client_id) { showFeedbackOutlook(false, 'Introduce el Client ID primero'); return; }
+
+  document.getElementById('deviceCodeBox').classList.add('d-none');
+  showFeedbackOutlook(null, '⏳ Iniciando…');
+
   try {
-    const res = await fetch('/api/outlook/test', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    const res = await fetch('/api/auth/device-code/start', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({client_id})
     });
     const json = await res.json();
-    if (json.ok && json.smtp_port && json.smtp_port !== data.smtp_port) {
-      document.getElementById('smtp_port').value = json.smtp_port;
-    }
-    showFeedback(json.ok, json.message);
+    if (!res.ok || json.error) { showFeedbackOutlook(false, json.error || 'Error al iniciar'); return; }
+
+    // Show code
+    document.getElementById('verificationUri').href = json.verification_uri;
+    document.getElementById('verificationUri').textContent = json.verification_uri;
+    document.getElementById('userCode').textContent = json.user_code;
+    document.getElementById('deviceCodeBox').classList.remove('d-none');
+    document.getElementById('feedbackOutlook').style.display = 'none';
+
+    _deviceCode = json.device_code;
+    const interval = (json.interval || 5) * 1000;
+    if (_pollInterval) clearInterval(_pollInterval);
+    _pollInterval = setInterval(() => pollDeviceCode(_deviceCode), interval);
+
   } catch(e) {
-    showFeedback(false, 'Error de red al contactar con el servidor local.');
+    showFeedbackOutlook(false, 'Error de red: ' + e.message);
   }
 }
 
-document.getElementById('setupForm').addEventListener('submit', async (e) => {
+async function pollDeviceCode(deviceCode) {
+  try {
+    const res = await fetch('/api/auth/device-code/poll', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({device_code: deviceCode})
+    });
+    const json = await res.json();
+
+    if (json.status === 'ok') {
+      clearInterval(_pollInterval);
+      document.getElementById('deviceCodeBox').classList.add('d-none');
+      showFeedbackOutlook(true, `✓ Sesión iniciada como ${json.name} (${json.email}) — redirigiendo…`);
+      setTimeout(() => window.location.href = '/dashboard', 1500);
+    } else if (json.status === 'expired' || json.status === 'error') {
+      clearInterval(_pollInterval);
+      document.getElementById('deviceCodeBox').classList.add('d-none');
+      showFeedbackOutlook(false, 'Sesión expirada o cancelada. Vuelve a intentarlo. ' + (json.message || ''));
+    }
+    // 'pending' → keep polling
+  } catch(e) {
+    // network error, keep polling
+  }
+}
+
+// ── Gmail SMTP ─────────────────────────────────────────────────────────────────
+function showFeedbackGmail(ok, msg) {
+  const el = document.getElementById('feedbackGmail');
+  el.style.display = 'block';
+  el.className = ok === true ? 'alert alert-success' : ok === false ? 'alert alert-danger' : 'alert alert-info';
+  el.innerHTML = (msg || '').replace(/\n/g, '<br>');
+}
+
+function gmailData() {
+  return {
+    user_email: document.getElementById('gmail_email').value.trim(),
+    password: document.getElementById('gmail_password').value,
+    smtp_host: 'smtp.gmail.com', smtp_port: 587,
+    imap_host: 'imap.gmail.com', imap_port: 993,
+  };
+}
+
+async function testGmail() {
+  const data = gmailData();
+  if (!data.user_email || !data.password) { showFeedbackGmail(false, 'Rellena email y contraseña'); return; }
+  showFeedbackGmail(null, '⏳ Probando conexión…');
+  const res = await fetch('/api/outlook/test', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+  });
+  const json = await res.json();
+  showFeedbackGmail(json.ok, json.message);
+}
+
+document.getElementById('gmailForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const data = getFormData();
+  const data = gmailData();
   const btn = e.submitter;
-  btn.disabled = true;
-  btn.textContent = '⏳ Conectando (hasta 30s)…';
+  btn.disabled = true; btn.textContent = '⏳ Conectando…';
   try {
     const res = await fetch('/api/outlook/connect', {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
     });
     const json = await res.json();
     if (res.ok) {
-      showFeedback(true, '✓ ' + json.message + ' — redirigiendo al dashboard…');
+      showFeedbackGmail(true, '✓ ' + json.message + ' — redirigiendo…');
       setTimeout(() => window.location.href = '/dashboard', 1500);
-    } else {
-      showFeedback(false, json.error || 'Error al conectar');
-    }
-  } catch(e) {
-    showFeedback(false, 'Error de red al contactar con el servidor local.');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Guardar y conectar';
-  }
+    } else { showFeedbackGmail(false, json.error || 'Error al conectar'); }
+  } finally { btn.disabled = false; btn.textContent = 'Guardar y conectar'; }
 });
 
 async function disconnect() {

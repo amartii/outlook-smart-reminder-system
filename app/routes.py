@@ -13,20 +13,30 @@ from app.crypto import encrypt, decrypt
 logger = logging.getLogger(__name__)
 main = Blueprint("main", __name__)
 
+DELEGATED_SCOPES = [
+    "Mail.Send", "Mail.ReadWrite", "Contacts.Read", "User.Read", "offline_access"
+]
+
+# Temporary in-memory store for active device code flows (local app, fine)
+_device_flows: dict = {}
+
 
 def _get_active_connection():
     return OutlookConnection.query.filter_by(is_active=True).first()
 
 
 def _build_service(conn):
-    """Build the appropriate email service from the active connection."""
+    """Return the right service based on connection backend_type."""
+    if conn.backend_type == "delegated":
+        from app.delegated_service import DelegatedGraphService
+        return DelegatedGraphService(conn.id)
+    # smtp fallback
     from app.smtp_service import SMTPService
-    from app.crypto import decrypt
     return SMTPService(
-        smtp_host=conn.smtp_host,
-        smtp_port=conn.smtp_port,
-        imap_host=conn.imap_host,
-        imap_port=conn.imap_port,
+        smtp_host=conn.smtp_host or "smtp.gmail.com",
+        smtp_port=conn.smtp_port or 587,
+        imap_host=conn.imap_host or "imap.gmail.com",
+        imap_port=conn.imap_port or 993,
         username=conn.user_email,
         password=decrypt(conn.password_enc),
         sender_email=conn.user_email,
@@ -137,6 +147,108 @@ def api_outlook_disconnect():
     OutlookConnection.query.update({"is_active": False})
     db.session.commit()
     return jsonify({"message": "Conexion desactivada"})
+
+
+# ── Microsoft OAuth2 Device Code Flow ─────────────────────────────────────────
+
+@main.route("/api/auth/device-code/start", methods=["POST"])
+def api_device_code_start():
+    """Initiate Microsoft OAuth2 device code flow."""
+    import msal
+    data = request.get_json() or {}
+    client_id = data.get("client_id", "").strip()
+    if not client_id:
+        return jsonify({"error": "client_id requerido"}), 400
+
+    msal_app = msal.PublicClientApplication(
+        client_id,
+        authority="https://login.microsoftonline.com/common",
+    )
+    flow = msal_app.initiate_device_flow(scopes=DELEGATED_SCOPES)
+    if "error" in flow:
+        return jsonify({"error": flow.get("error_description", flow["error"])}), 400
+
+    _device_flows[flow["device_code"]] = {"flow": flow, "client_id": client_id}
+    return jsonify({
+        "user_code": flow["user_code"],
+        "verification_uri": flow.get("verification_uri", "https://microsoft.com/devicelogin"),
+        "message": flow.get("message", ""),
+        "device_code": flow["device_code"],
+        "expires_in": flow.get("expires_in", 900),
+        "interval": flow.get("interval", 5),
+    })
+
+
+@main.route("/api/auth/device-code/poll", methods=["POST"])
+def api_device_code_poll():
+    """Poll Microsoft token endpoint for device code completion (non-blocking)."""
+    import requests as req
+    from app.category_manager import CategoryManager
+    data = request.get_json() or {}
+    device_code_key = data.get("device_code", "")
+
+    if device_code_key not in _device_flows:
+        return jsonify({"status": "expired"})
+
+    stored = _device_flows[device_code_key]
+    client_id = stored["client_id"]
+    device_code = stored["flow"]["device_code"]
+
+    # Poll Microsoft token endpoint directly (non-blocking single request)
+    resp = req.post(
+        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "client_id": client_id,
+            "device_code": device_code,
+        },
+        timeout=15,
+    )
+    result = resp.json()
+
+    if "access_token" in result:
+        # Success — store connection
+        refresh_token = result.get("refresh_token", "")
+        # Get user info from Graph
+        try:
+            me_resp = req.get(
+                "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName",
+                headers={"Authorization": f"Bearer {result['access_token']}"},
+                timeout=10,
+            )
+            me = me_resp.json()
+            user_email = (me.get("mail") or me.get("userPrincipalName", "")).lower()
+            display_name = me.get("displayName", user_email)
+        except Exception:
+            user_email = ""
+            display_name = ""
+
+        OutlookConnection.query.update({"is_active": False})
+        db.session.flush()
+        conn = OutlookConnection(
+            backend_type="delegated",
+            client_id=client_id,
+            user_email=user_email,
+            display_name=display_name,
+            password_enc=encrypt(refresh_token),  # refresh token stored here
+            is_active=True,
+        )
+        db.session.add(conn)
+        db.session.commit()
+        CategoryManager.seed_default_categories()
+
+        del _device_flows[device_code_key]
+        return jsonify({"status": "ok", "email": user_email, "name": display_name,
+                        "connection": conn.to_dict()})
+
+    error = result.get("error", "")
+    if error in ("authorization_pending", "slow_down"):
+        return jsonify({"status": "pending"})
+    if error in ("expired_token", "code_expired", "authorization_declined"):
+        _device_flows.pop(device_code_key, None)
+        return jsonify({"status": "expired", "message": result.get("error_description", "")})
+
+    return jsonify({"status": "error", "message": result.get("error_description", error)})
 
 
 # ── Categories ─────────────────────────────────────────────────────────────────
