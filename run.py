@@ -12,5 +12,5 @@ app = create_app()
 
 if __name__ == "__main__":
     start_scheduler(app)
-    print("🚀 Email Agent en http://localhost:5000  (Ctrl+C para parar)")
+    print("🚀 Outlook Smart Reminder en http://localhost:5000  (Ctrl+C para parar)")
     app.run(debug=False, port=5000, use_reloader=False)
