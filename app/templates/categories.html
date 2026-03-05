@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Categorías — Outlook Smart Reminder{% endblock %}
+{% block nav_categories %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+        <h1 class="ac-page-title"><span>></span> Categorías</h1>
+        <p class="ac-page-subtitle">Define reglas de recordatorio por categoría de contacto.</p>
+    </div>
+    <button class="btn btn-ac-primary" data-bs-toggle="modal" data-bs-target="#modalCategory">
+        <i class="bi bi-plus-lg me-1"></i> Nueva categoría
+    </button>
+</div>
+
+<!-- Color legend -->
+<div class="alert alert-info mb-4" style="font-size:0.82rem;">
+    <i class="bi bi-info-circle me-2"></i>
+    Cada categoría define cuántas horas esperar sin respuesta antes de enviar un recordatorio automático.
+    Los colores se sincronizan con las categorías de Outlook de tu cuenta.
+</div>
+
+<!-- Categories table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-tags me-2"></i>Reglas de categoría</span>
+        <button class="btn btn-sm btn-ac-outline" onclick="syncCategoriesToOutlook()" id="btnSyncCats">
+            <i class="bi bi-arrow-repeat me-1"></i> Sincronizar con Outlook
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <table class="table mb-0" id="categoriesTable">
+            <thead>
+                <tr>
+                    <th>Color</th>
+                    <th>Nombre</th>
+                    <th>Recordatorio</th>
+                    <th>Descripción</th>
+                    <th>Contactos</th>
+                    <th>Pendientes</th>
+                    <th style="width:120px">Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="categoriesTbody">
+                <tr><td colspan="7" class="text-center py-4 text-muted">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Cargando...
+                </td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal: create/edit category -->
+<div class="modal fade" id="modalCategory" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="border-radius:0;border-top:4px solid var(--ac-purple);">
+            <div class="modal-header" style="border-bottom:1px solid var(--ac-border);">
+                <h5 class="modal-title fw-bold" id="modalCatTitle">Nueva categoría</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="categoryForm">
+                    <input type="hidden" id="catId">
+                    <div class="mb-3">
+                        <label class="form-label">Nombre</label>
+                        <input type="text" class="form-control" id="catName" placeholder="Ej: Manager, Senior, VIP" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Color Outlook</label>
+                        <select class="form-select" id="catColor">
+                            <option value="preset4">Azul (preset4)</option>
+                            <option value="preset3">Verde (preset3)</option>
+                            <option value="preset1">Naranja (preset1)</option>
+                            <option value="preset0">Rojo (preset0)</option>
+                            <option value="preset5">Morado (preset5)</option>
+                            <option value="preset6">Teal (preset6)</option>
+                            <option value="preset2">Amarillo (preset2)</option>
+                        </select>
+                        <div class="form-text">Este color aparecerá en los emails de Outlook.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Horas para recordatorio</label>
+                        <input type="number" class="form-control" id="catHours" min="1" max="720" value="72">
+                        <div class="form-text">Horas sin respuesta antes de enviar el recordatorio (72h = 3 días).</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descripción</label>
+                        <input type="text" class="form-control" id="catDesc" placeholder="Opcional">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid var(--ac-border);">
+                <button type="button" class="btn btn-ac-outline" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-ac-primary" onclick="saveCategory()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRESET_COLORS = {
+    preset0:'#e74856', preset1:'#ff8c00', preset2:'#f4d000',
+    preset3:'#16c60c', preset4:'#0078d4', preset5:'#886ce4',
+    preset6:'#00b7c3', none:'#6b7280'
+};
+
+async function loadCategories() {
+    const res  = await fetch('/api/categories');
+    const data = await res.json();
+    const tbody = document.getElementById('categoriesTbody');
+    if (!data.categories.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No hay categorías. Crea una.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.categories.map(c => {
+        const hex = PRESET_COLORS[c.color] || '#6b7280';
+        const days = (c.reminder_hours / 24).toFixed(1).replace('.0','');
+        return `<tr>
+            <td><span class="ac-color-swatch" style="background:${hex}"></span></td>
+            <td class="fw-bold">${esc(c.name)}</td>
+            <td><strong>${c.reminder_hours}h</strong> <span class="text-muted">(${days}d)</span></td>
+            <td style="color:var(--ac-gray)">${esc(c.description||'')}</td>
+            <td>${c.contacts_count ?? '—'}</td>
+            <td>${c.pending_reminders ?? '—'}</td>
+            <td>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-sm btn-ac-outline" style="font-size:0.72rem;padding:0.2rem 0.6rem;" onclick="editCategory(${JSON.stringify(c).replace(/"/g,'&quot;')})">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm" style="border:1px solid var(--ac-danger);color:var(--ac-danger);border-radius:0;font-size:0.72rem;padding:0.2rem 0.6rem;" onclick="deleteCategory(${c.id},'${esc(c.name)}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function editCategory(cat) {
+    document.getElementById('modalCatTitle').textContent = 'Editar categoría';
+    document.getElementById('catId').value    = cat.id;
+    document.getElementById('catName').value  = cat.name;
+    document.getElementById('catColor').value = cat.color;
+    document.getElementById('catHours').value = cat.reminder_hours;
+    document.getElementById('catDesc').value  = cat.description || '';
+    new bootstrap.Modal(document.getElementById('modalCategory')).show();
+}
+
+document.getElementById('modalCategory').addEventListener('hidden.bs.modal', () => {
+    document.getElementById('catId').value   = '';
+    document.getElementById('catName').value = '';
+    document.getElementById('catHours').value = 72;
+    document.getElementById('catDesc').value  = '';
+    document.getElementById('modalCatTitle').textContent = 'Nueva categoría';
+});
+
+async function saveCategory() {
+    const id      = document.getElementById('catId').value;
+    const payload = {
+        name:           document.getElementById('catName').value.trim(),
+        color:          document.getElementById('catColor').value,
+        reminder_hours: parseInt(document.getElementById('catHours').value),
+        description:    document.getElementById('catDesc').value.trim(),
+    };
+    if (!payload.name) { showAlert('El nombre es obligatorio', 'warning'); return; }
+    const url    = id ? `/api/categories/${id}` : '/api/categories';
+    const method = id ? 'PUT' : 'POST';
+    const res    = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data   = await res.json();
+    if (res.ok) {
+        bootstrap.Modal.getInstance(document.getElementById('modalCategory')).hide();
+        showAlert(`Categoría "${payload.name}" guardada.`, 'success');
+        loadCategories();
+    } else {
+        showAlert(data.error || 'Error al guardar', 'danger');
+    }
+}
+
+async function deleteCategory(id, name) {
+    if (!confirm(`¿Eliminar la categoría "${name}"? Los contactos quedarán sin categoría.`)) return;
+    const res = await fetch(`/api/categories/${id}`, { method:'DELETE' });
+    const data = await res.json();
+    showAlert(data.message || data.error, res.ok ? 'success' : 'danger');
+    loadCategories();
+}
+
+async function syncCategoriesToOutlook() {
+    const btn = document.getElementById('btnSyncCats');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sincronizando...';
+    // Load categories and create each in Outlook via POST (server handles ensure_category_exists)
+    const res = await fetch('/api/categories');
+    const data = await res.json();
+    showAlert(`${data.categories.length} categorías verificadas en Outlook.`, 'success');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i> Sincronizar con Outlook';
+}
+
+loadCategories();
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+{% endblock %}

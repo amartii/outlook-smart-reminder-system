@@ -1,91 +1,496 @@
 {% extends "base.html" %}
-{% block title %}Email Agent — Dashboard{% endblock %}
-{% block step3_active %}active{% endblock %}
+{% block title %}Dashboard — Outlook Smart Reminder{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-4">
+
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
     <div>
-        <h1 class="oto-page-title mb-1" id="campaignTitle">Campaña</h1>
-        <div class="d-flex align-items-center gap-2">
-            <span id="campaignStatus"></span>
-            <span class="text-muted small" id="lastUpdated"></span>
-        </div>
+        <h1 class="ac-page-title"><span>></span> Dashboard</h1>
+        <p class="ac-page-subtitle mb-0">
+            {% if connection %}
+                <span class="ac-conn-pill"><i class="bi bi-circle-fill me-1" style="font-size:0.5rem;"></i>{{ connection.user_email }}</span>
+            {% else %}
+                <span class="ac-conn-pill disconnected"><i class="bi bi-circle-fill me-1" style="font-size:0.5rem;"></i>Sin conexión</span>
+            {% endif %}
+            <span class="ms-2 text-muted small" id="lastUpdated"></span>
+        </p>
     </div>
-    <div class="d-flex gap-2 mt-1">
-        <button class="btn btn-oto-outline btn-sm" id="btnPause">
-            <i class="bi bi-pause-circle me-1"></i>Pausar
+    <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-ac-outline" onclick="syncContacts()" id="btnSync">
+            <i class="bi bi-arrow-repeat me-1"></i> Sincronizar contactos
         </button>
-        <button class="btn btn-sm" id="btnReset" style="border:1px solid #dc2626;color:#dc2626;border-radius:2px;background:transparent;font-size:0.8rem;padding:0.35rem 0.9rem;font-weight:500;">
-            <i class="bi bi-arrow-counterclockwise me-1"></i>Nueva campaña
+        <button class="btn btn-ac-primary" data-bs-toggle="modal" data-bs-target="#modalSendEmail">
+            <i class="bi bi-send me-1"></i> Enviar email
         </button>
     </div>
 </div>
 
-<!-- Error banner -->
-<div id="errorBanner" class="alert alert-danger d-none mb-4">
-    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-    <strong>Error de envío:</strong> <span id="errorMsg"></span>
-    <div class="mt-2 small">
-        Ve al <a href="/configure" class="alert-link">Paso 2</a>, comprueba tu Gmail y App Password, y vuelve a lanzar la campaña.
+<!-- Stats row -->
+<div class="row g-3 mb-4" id="statsRow">
+    <div class="col-6 col-md-2">
+        <div class="ac-stat stat-total">
+            <div class="ac-stat-value" id="statTotal">—</div>
+            <div class="ac-stat-label">Enviados</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="ac-stat stat-pending">
+            <div class="ac-stat-value" id="statPending">—</div>
+            <div class="ac-stat-label">Pendientes</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="ac-stat stat-replied">
+            <div class="ac-stat-value" id="statReplied">—</div>
+            <div class="ac-stat-label">Respondidos</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="ac-stat stat-overdue">
+            <div class="ac-stat-value" id="statOverdue">—</div>
+            <div class="ac-stat-label">Vencidos</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="ac-stat stat-upcoming">
+            <div class="ac-stat-value" id="statUpcoming">—</div>
+            <div class="ac-stat-label">Próx. 24h</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="ac-stat stat-snoozed">
+            <div class="ac-stat-value" id="statSnoozed">—</div>
+            <div class="ac-stat-label">Pospuestos</div>
+        </div>
     </div>
 </div>
 
-<!-- Stats -->
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <div class="oto-stat stat-total">
-            <div class="oto-stat-value" id="statTotal">—</div>
-            <div class="oto-stat-label">Total</div>
+<div class="row g-3">
+
+    <!-- Overdue reminders -->
+    <div class="col-12 col-lg-7">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-alarm me-2" style="color:var(--ac-danger)"></i>Recordatorios vencidos</span>
+                <button class="btn btn-sm btn-ac-primary" onclick="sendAllOverdue()" id="btnSendAll">
+                    <i class="bi bi-send-check me-1"></i> Enviar todos
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Contacto</th>
+                                <th>Asunto</th>
+                                <th>Enviado</th>
+                                <th>Vence</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="overdueTable">
+                            <tr><td colspan="5" class="text-center py-4 text-muted">
+                                <span class="spinner-border spinner-border-sm me-2"></span>Cargando...
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="oto-stat stat-sent">
-            <div class="oto-stat-value" id="statSent">—</div>
-            <div class="oto-stat-label">Enviados</div>
+
+    <!-- Activity timeline -->
+    <div class="col-12 col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-clock-history me-2"></i>Actividad reciente
+            </div>
+            <div class="card-body p-0" style="max-height:420px;overflow-y:auto;">
+                <ul class="ac-timeline" id="activityList">
+                    <li class="ac-timeline-item">
+                        <div class="ac-timeline-content">
+                            <div class="ac-timeline-meta text-center py-2">
+                                <span class="spinner-border spinner-border-sm"></span> Cargando...
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+            </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="oto-stat stat-replied">
-            <div class="oto-stat-value" id="statReplied">—</div>
-            <div class="oto-stat-label">Respondidos</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="oto-stat stat-pending">
-            <div class="oto-stat-value" id="statPending">—</div>
-            <div class="oto-stat-label">Sin respuesta</div>
-        </div>
-    </div>
+
 </div>
 
-<!-- Table -->
-<div class="card">
+<!-- All sent emails -->
+<div class="card mt-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-people me-2"></i>Contactos</span>
-        <small class="text-muted">Actualización automática cada 30 s</small>
+        <span><i class="bi bi-envelope me-2"></i>Todos los emails</span>
+        <div class="d-flex gap-2">
+            <select class="form-select form-select-sm" id="filterStatus" style="width:160px;border-radius:0;">
+                <option value="">Todos los estados</option>
+                <option value="pending">Pendientes</option>
+                <option value="replied">Respondidos</option>
+                <option value="reminder_sent">Recordatorio enviado</option>
+                <option value="snoozed">Pospuestos</option>
+                <option value="closed">Cerrados</option>
+            </select>
+            <small class="text-muted d-flex align-items-center">Actualización cada 30s</small>
+        </div>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table mb-0">
                 <thead>
                     <tr>
-                        <th>Nombre</th>
-                        <th>Email</th>
+                        <th>Contacto</th>
+                        <th>Empresa</th>
+                        <th>Categoría</th>
+                        <th>Asunto</th>
                         <th>Estado</th>
                         <th>Enviado</th>
-                        <th>Respondido</th>
-                        <th>Follow-up</th>
-                        <th>Error</th>
+                        <th>Recordatorio</th>
+                        <th>Acciones</th>
                     </tr>
                 </thead>
-                <tbody id="contactsTable">
-                    <tr><td colspan="7" class="text-center py-5">
-                        <span class="spinner-border spinner-border-sm me-2" style="color:var(--oto-blue)"></span>
-                        <span class="text-muted">Cargando...</span>
+                <tbody id="emailsTable">
+                    <tr><td colspan="8" class="text-center py-5 text-muted">
+                        <span class="spinner-border spinner-border-sm me-2"></span>Cargando...
                     </td></tr>
                 </tbody>
             </table>
         </div>
     </div>
 </div>
+
+<!-- Modal: Send email -->
+<div class="modal fade" id="modalSendEmail" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="border-radius:0;border-top:4px solid var(--ac-purple);">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold"><i class="bi bi-send me-2" style="color:var(--ac-purple)"></i>Enviar email</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Destinatario</label>
+                    <input type="text" class="form-control" id="sendContactSearch" placeholder="Buscar por nombre o email..." oninput="searchContacts(this.value)">
+                    <div id="contactSuggestions" class="list-group mt-1" style="position:absolute;z-index:1000;max-width:500px;display:none;"></div>
+                    <input type="hidden" id="sendContactId">
+                </div>
+                <div id="contactPreview" class="d-none alert alert-info mb-3" style="font-size:0.85rem;"></div>
+                <div class="mb-3">
+                    <label class="form-label">Asunto</label>
+                    <input type="text" class="form-control" id="sendSubject" placeholder="Asunto del email">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Cuerpo (HTML)</label>
+                    <textarea class="form-control" id="sendBody" rows="7" placeholder="<p>Hola...</p>"></textarea>
+                    <div class="form-text">Puedes usar HTML. El recordatorio se programará automáticamente según la categoría del contacto.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ac-outline" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-ac-primary" onclick="sendEmail()" id="btnSendEmail">
+                    <i class="bi bi-send me-1"></i> Enviar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRESET_COLORS = {
+    preset0:'#e74856',preset1:'#ff8c00',preset2:'#f4d000',
+    preset3:'#16c60c',preset4:'#0078d4',preset5:'#886ce4',
+    preset6:'#00b7c3',none:'#6b7280'
+};
+
+const STATUS_LABELS = {
+    pending:'Pendiente', replied:'Respondido', reminder_sent:'Recordatorio enviado',
+    snoozed:'Pospuesto', closed:'Cerrado',
+};
+
+function statusBadge(s) {
+    return `<span class="badge-status badge-${s}">${STATUS_LABELS[s]||s}</span>`;
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function fmt(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
+function fmtRelative(iso) {
+    if (!iso) return '—';
+    const diff = Math.round((new Date(iso) - Date.now()) / 60000);
+    if (diff < -1440) return `Hace ${Math.round(-diff/1440)}d`;
+    if (diff < -60)   return `Hace ${Math.round(-diff/60)}h`;
+    if (diff < 0)     return `Hace ${-diff}min`;
+    if (diff < 60)    return `En ${diff}min`;
+    if (diff < 1440)  return `En ${Math.round(diff/60)}h`;
+    return `En ${Math.round(diff/1440)}d`;
+}
+
+// ── Load stats ────────────────────────────────────────────
+async function loadStats() {
+    const res  = await fetch('/api/dashboard/stats');
+    const data = await res.json();
+    document.getElementById('statTotal').textContent   = data.total_emails ?? '—';
+    document.getElementById('statPending').textContent = data.by_status?.pending ?? '—';
+    document.getElementById('statReplied').textContent = data.by_status?.replied ?? '—';
+    document.getElementById('statOverdue').textContent = data.overdue_reminders ?? '—';
+    document.getElementById('statUpcoming').textContent= data.upcoming_24h ?? '—';
+    document.getElementById('statSnoozed').textContent = data.by_status?.snoozed ?? '—';
+
+    // Activity
+    const list = document.getElementById('activityList');
+    if (!data.activity || !data.activity.length) {
+        list.innerHTML = '<li class="ac-timeline-item"><div class="ac-timeline-content"><div class="ac-timeline-meta text-center py-3">Sin actividad reciente.</div></div></li>';
+    } else {
+        list.innerHTML = data.activity.map(e => {
+            const isReminder = e.type === 'reminder';
+            return `<li class="ac-timeline-item">
+                <div class="ac-timeline-icon type-${isReminder?'reminder':'reply'}">
+                    <i class="bi bi-${isReminder?'bell':'reply'}"></i>
+                </div>
+                <div class="ac-timeline-content">
+                    <div class="ac-timeline-title">${esc(e.contact)}</div>
+                    <div class="ac-timeline-meta">
+                        ${isReminder ? 'Recordatorio enviado' : 'Respondido'}
+                        ${e.label ? ` · <span style="color:var(--ac-purple)">${esc(e.label)}</span>` : ''}
+                        · ${fmt(e.at)}
+                        <br><span style="font-size:0.75rem;">${esc(e.subject)}</span>
+                    </div>
+                </div>
+            </li>`;
+        }).join('');
+    }
+}
+
+// ── Load overdue reminders ────────────────────────────────
+async function loadOverdue() {
+    const res  = await fetch('/api/reminders/pending');
+    const data = await res.json();
+    const tbody = document.getElementById('overdueTable');
+    if (!data.reminders.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-check-circle text-success me-2"></i>Sin recordatorios vencidos.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.reminders.map(se => {
+        const contact = se.contact || {};
+        return `<tr>
+            <td>
+                <div class="fw-bold">${esc(contact.display_name||contact.email)}</div>
+                <div style="font-size:0.75rem;color:var(--ac-gray)">${esc(contact.email)}</div>
+            </td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(se.subject)}</td>
+            <td>${fmt(se.sent_at)}</td>
+            <td><span style="color:var(--ac-danger);font-weight:600;">${fmtRelative(se.reminder_at)}</span></td>
+            <td>
+                <div class="ac-reminder-actions">
+                    <button class="btn btn-ac-primary" onclick="sendNow(${se.id})" title="Enviar ahora">
+                        <i class="bi bi-send"></i>
+                    </button>
+                    <button class="btn btn-ac-outline" onclick="snooze(${se.id},24)" title="Posponer 24h">
+                        <i class="bi bi-clock"></i> 24h
+                    </button>
+                    <button class="btn btn-ac-outline" onclick="closeReminder(${se.id})" title="Cerrar">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+// ── Load all emails ───────────────────────────────────────
+async function loadEmails() {
+    const status = document.getElementById('filterStatus').value;
+    const url    = status ? `/api/emails?status=${status}` : '/api/emails';
+    const res    = await fetch(url);
+    const data   = await res.json();
+    const tbody  = document.getElementById('emailsTable');
+    if (!data.emails.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-5 text-muted">No hay emails registrados.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.emails.map(se => {
+        const contact  = se.contact || {};
+        const catColor = contact.category_color ? (PRESET_COLORS[contact.category_color]||'#999') : '#999';
+        const catName  = contact.category_name  || '—';
+        return `<tr>
+            <td>
+                <div class="fw-bold">${esc(contact.display_name||contact.email)}</div>
+                <div style="font-size:0.75rem;color:var(--ac-gray)">${esc(contact.email)}</div>
+            </td>
+            <td style="font-size:0.8rem;">${esc(contact.company_name||'—')}</td>
+            <td>
+                <span class="ac-color-swatch me-1" style="background:${catColor}"></span>
+                ${esc(catName)}
+            </td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(se.subject)}">${esc(se.subject)}</td>
+            <td>${statusBadge(se.status)}</td>
+            <td>${fmt(se.sent_at)}</td>
+            <td>
+                ${se.status==='replied'
+                    ? `<span style="color:var(--ac-success);font-size:0.8rem;"><i class="bi bi-check-circle me-1"></i>${fmt(se.replied_at)}</span>`
+                    : `<span style="${se.reminder_at&&new Date(se.reminder_at)<Date.now()?'color:var(--ac-danger);':''}">${fmt(se.reminder_at)}</span>`}
+            </td>
+            <td>
+                <div class="ac-reminder-actions">
+                    ${se.status!=='replied'&&se.status!=='closed' ? `
+                    <button class="btn btn-ac-primary" onclick="sendNow(${se.id})" title="Enviar recordatorio ahora"><i class="bi bi-bell"></i></button>
+                    <button class="btn btn-ac-outline" onclick="snooze(${se.id},24)" title="Posponer 24h"><i class="bi bi-clock"></i></button>
+                    <button class="btn btn-ac-outline" onclick="closeReminder(${se.id})" title="Cerrar"><i class="bi bi-x-lg"></i></button>
+                    ` : ''}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+// ── Actions ───────────────────────────────────────────────
+async function sendNow(id) {
+    const res  = await fetch(`/api/reminders/${id}/send-now`, {method:'POST'});
+    const data = await res.json();
+    showAlert(res.ok ? data.message : data.error, res.ok ? 'success' : 'danger');
+    refresh();
+}
+
+async function snooze(id, hours) {
+    const res  = await fetch(`/api/reminders/${id}/snooze`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hours})});
+    const data = await res.json();
+    showAlert(res.ok ? data.message : data.error, res.ok ? 'success' : 'danger');
+    refresh();
+}
+
+async function closeReminder(id) {
+    if (!confirm('¿Cerrar este recordatorio permanentemente?')) return;
+    const res  = await fetch(`/api/reminders/${id}/close`, {method:'POST'});
+    const data = await res.json();
+    showAlert(res.ok ? data.message : data.error, res.ok ? 'success' : 'danger');
+    refresh();
+}
+
+async function sendAllOverdue() {
+    const btn = document.getElementById('btnSendAll');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Enviando...';
+    const res   = await fetch('/api/reminders/pending');
+    const data  = await res.json();
+    let ok = 0;
+    for (const se of data.reminders) {
+        const r = await fetch(`/api/reminders/${se.id}/send-now`, {method:'POST'});
+        if (r.ok) ok++;
+    }
+    showAlert(`${ok} recordatorios enviados.`, 'success');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-send-check me-1"></i> Enviar todos';
+    refresh();
+}
+
+async function syncContacts() {
+    const btn = document.getElementById('btnSync');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sincronizando...';
+    const res  = await fetch('/api/contacts/sync', {method:'POST'});
+    const data = await res.json();
+    showAlert(res.ok ? data.message : data.error, res.ok ? 'success' : 'danger');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i> Sincronizar contactos';
+}
+
+// ── Contact search for send modal ─────────────────────────
+let searchTimeout;
+async function searchContacts(q) {
+    clearTimeout(searchTimeout);
+    const box = document.getElementById('contactSuggestions');
+    if (q.length < 2) { box.style.display='none'; return; }
+    searchTimeout = setTimeout(async () => {
+        const res  = await fetch(`/api/contacts?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (!data.contacts.length) { box.style.display='none'; return; }
+        box.innerHTML = data.contacts.slice(0,6).map(c =>
+            `<button type="button" class="list-group-item list-group-item-action" style="border-radius:0;font-size:0.85rem;" onclick="selectContact(${c.id},'${esc(c.display_name||c.email)}','${esc(c.email)}','${esc(c.category_name||'')}',${c.reminder_hours||72})">
+                <strong>${esc(c.display_name||c.email)}</strong>
+                <span class="text-muted ms-2">${esc(c.email)}</span>
+                ${c.category_name ? `<span class="badge ms-2" style="background:var(--ac-light);color:var(--ac-gray);border-radius:0;">${esc(c.category_name)}</span>` : ''}
+            </button>`
+        ).join('');
+        box.style.display = 'block';
+    }, 300);
+}
+
+function selectContact(id, name, email, category, hours) {
+    document.getElementById('sendContactId').value = id;
+    document.getElementById('sendContactSearch').value = `${name} <${email}>`;
+    document.getElementById('contactSuggestions').style.display = 'none';
+    const preview = document.getElementById('contactPreview');
+    preview.classList.remove('d-none');
+    preview.innerHTML = `<i class="bi bi-person-check me-2"></i>
+        <strong>${esc(name)}</strong> — ${esc(email)}<br>
+        <span style="font-size:0.8rem;">Categoría: <strong>${esc(category)||'Sin categoría'}</strong> · Recordatorio en <strong>${hours}h</strong></span>`;
+}
+
+async function sendEmail() {
+    const contactId = document.getElementById('sendContactId').value;
+    const subject   = document.getElementById('sendSubject').value.trim();
+    const bodyHtml  = document.getElementById('sendBody').value.trim();
+    if (!contactId) { showAlert('Selecciona un contacto.', 'warning'); return; }
+    if (!subject)   { showAlert('El asunto es obligatorio.', 'warning'); return; }
+    if (!bodyHtml)  { showAlert('El cuerpo del email es obligatorio.', 'warning'); return; }
+    const btn = document.getElementById('btnSendEmail');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Enviando...';
+    try {
+        const res  = await fetch('/api/emails/send', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({contact_id: parseInt(contactId), subject, body_html: bodyHtml}),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('modalSendEmail')).hide();
+            showAlert(data.message, 'success');
+            refresh();
+        } else {
+            showAlert(data.error || 'Error al enviar', 'danger');
+        }
+    } catch(e) { showAlert('Error: ' + e.message, 'danger'); }
+    finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send me-1"></i> Enviar';
+    }
+}
+
+// ── Auto-refresh ──────────────────────────────────────────
+function refresh() {
+    loadStats();
+    loadOverdue();
+    loadEmails();
+}
+
+refresh();
+setInterval(refresh, 30000);
+
+// Live clock
+setInterval(() => {
+    const el = document.getElementById('lastUpdated');
+    if (el) el.textContent = '· ' + new Date().toLocaleTimeString('es-ES');
+}, 1000);
+
+document.getElementById('filterStatus').addEventListener('change', loadEmails);
+
+// Close suggestions on click outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#sendContactSearch') && !e.target.closest('#contactSuggestions')) {
+        document.getElementById('contactSuggestions').style.display = 'none';
+    }
+});
+</script>
 {% endblock %}
