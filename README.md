@@ -1,6 +1,6 @@
-# ONEtoONE Email Agent
+# Outlook Smart Reminder System
 
-> Herramienta de automatización de campañas de email personalizado, construida para ONEtoONE Corporate Finance.  
+> Sistema inteligente de recordatorios para Outlook, construido para ONEtoONE Corporate Finance.  
 > Funciona en local — tus datos no salen de tu ordenador.
 
 ---
