@@ -18,13 +18,16 @@ El agente está construido sobre las siguientes tecnologías:
 | Capa | Tecnología |
 |------|-----------|
 | **Backend** | Python 3.10+ · Flask · SQLAlchemy · APScheduler |
-| **Protocolo de correo** | SMTP (envío) + IMAP (lectura/detección) — estándar de internet, sin SDKs externos |
+| **Autenticación** | OAuth2 Device Code Flow — Microsoft Identity Platform (MSAL) |
+| **API de correo** | Microsoft Graph API v1.0 — envío, lectura y detección de respuestas vía REST |
 | **Base de datos** | SQLite local (sin servidor, sin configuración adicional) |
-| **Cifrado** | Fernet (AES-128-CBC) para proteger las credenciales almacenadas |
+| **Cifrado** | Fernet (AES-128-CBC) — protege el refresh token almacenado |
 | **Frontend** | Bootstrap 5 · Vanilla JS · Jinja2 |
 | **Identidad visual** | Accenture brand — negro `#000000`, morado `#A100FF`, tipografía Inter |
 
-El agente corre **100% en local** sobre el equipo del usuario. No requiere servicios en la nube, APIs externas de pago ni configuración en Azure o Google Cloud. La única conexión externa es con el servidor de correo corporativo (smtp.office365.com / outlook.office365.com), que ya usa el usuario a diario.
+El agente corre **100% en local** sobre el equipo del usuario. Las únicas conexiones externas son con los servidores oficiales de Microsoft: `login.microsoftonline.com` (autenticación) y `graph.microsoft.com` (emails). No hay ningún servicio intermediario.
+
+> **Alternativa Gmail:** para cuentas Google, el agente también soporta conexión via SMTP/IMAP con App Password, sin necesidad de OAuth.
 
 ---
 
@@ -47,7 +50,7 @@ El agente está dirigido a **profesionales de Accenture** que gestionan relacion
 
 ## Problema que resuelve
 
-En entornos de consultoría de alto ritmo como Accenture, el seguimiento de emails es una tarea crítica pero costosa en tiempo y atención. El problema concreto que resuelve el agente es:
+En entornos de consultoría de alto ritmo como Accenture, el seguimiento de emails es una tarea crítica pero costosa en tiempo y atención.
 
 ### Sin el agente
 
@@ -62,12 +65,12 @@ En entornos de consultoría de alto ritmo como Accenture, el seguimiento de emai
 
 1. El profesional envía el email desde la interfaz del agente
 2. El agente registra la conversación y calcula automáticamente cuándo recordar según el nivel del contacto
-3. Monitoriza la bandeja de entrada cada 15 minutos buscando respuestas
+3. Monitoriza la bandeja de entrada cada 15 minutos buscando respuestas vía Microsoft Graph
 4. Si detecta respuesta → cierra el seguimiento automáticamente
 5. Si detecta una etiqueta en la respuesta ("contestar en 2 días", "al final del día") → reprograma el recordatorio sin intervención humana
 6. Si no hay respuesta en el plazo definido → envía el recordatorio automáticamente
 
-El profesional solo interviene cuando hay una acción real que tomar. El ruido de los seguimientos pendientes desaparece.
+El profesional solo interviene cuando hay una acción real que tomar.
 
 ---
 
@@ -80,14 +83,21 @@ El profesional solo interviene cuando hay una acción real que tomar. El ruido d
 | **Python 3.10+** | Instalado en el equipo |
 | **Git** | Para clonar el repositorio |
 
-### Para conectar la cuenta de Outlook
+### Para conectar la cuenta de Microsoft Outlook
 
 | Dato | Obligatorio | Descripción |
 |------|-------------|-------------|
-| **Email corporativo** | ✅ | La dirección desde la que se enviarán los emails (`nombre@empresa.com`) |
-| **Contraseña de Outlook** | ✅ | La contraseña habitual de la cuenta. Si la cuenta tiene verificación en dos pasos (MFA), se necesita generar una **contraseña de aplicación** desde account.microsoft.com |
+| **Application (Client) ID** | ✅ | Identificador de la app registrada en Azure Portal (gratuito, 5 minutos). No es una contraseña. |
+| **Cuenta Microsoft** | ✅ | La cuenta de Outlook que se autorizará (corporativa o personal). La contraseña la introduce el usuario directamente en la web de Microsoft — el agente **nunca la recibe** |
 
-> Los servidores SMTP/IMAP de Office 365 ya están preconfigurados. No hay que introducir ningún dato técnico adicional salvo que se use un proveedor distinto.
+> El registro de la app en Azure Portal es **gratuito** con cualquier cuenta Microsoft, incluso personal (`@outlook.com`). No requiere permisos de administrador de Azure ni plan de pago.
+
+### Para conectar Gmail (alternativa)
+
+| Dato | Obligatorio | Descripción |
+|------|-------------|-------------|
+| **Email de Gmail** | ✅ | La dirección Google |
+| **App Password** | ✅ | Código de 16 caracteres generado en [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Requiere 2FA activo en Google. |
 
 ### Para usar el agente en el día a día
 
@@ -95,47 +105,47 @@ El profesional solo interviene cuando hay una acción real que tomar. El ruido d
 |------|-------------|
 | **Email del destinatario** | A quién va dirigido el email |
 | **Nombre y cargo del contacto** | Para asignarle la categoría correcta y personalizar los recordatorios |
-| **Categoría del contacto** | Blue / Manager / Senior Manager / VIP — define el tiempo de espera antes de recordar |
+| **Categoría del contacto** | Blue / Manager / Senior Manager / VIP — define el tiempo de espera |
 | **Asunto y cuerpo del email** | El mensaje que se quiere enviar |
 
-### Ningún dato sale del equipo salvo los propios emails
+### Privacidad
 
-Las credenciales se almacenan **cifradas** en la base de datos local. No se envían a ningún servidor externo. El agente solo se comunica con el servidor de correo corporativo de Microsoft.
+Las credenciales se almacenan **cifradas** en la base de datos local. El refresh token OAuth2 nunca se transmite salvo al servidor de Microsoft para renovarlo. No hay ningún backend intermediario.
 
 ---
 
 ## Beneficios que aporta
 
 ### ⏱ Ahorro de tiempo
-Elimina la gestión manual de seguimientos. Un profesional con 20 conversaciones activas puede pasar de dedicar 30–45 minutos diarios a revisar y redactar recordatorios, a no dedicar ninguno — el agente lo hace automáticamente.
+Elimina la gestión manual de seguimientos. Un profesional con 20 conversaciones activas puede pasar de dedicar 30–45 minutos diarios a revisar y redactar recordatorios, a no dedicar ninguno.
 
 ### 🎯 Cero seguimientos olvidados
-El sistema no depende de la memoria ni de recordatorios en el calendario. Cada email enviado tiene asociado un recordatorio calculado automáticamente. Si no hay respuesta, el seguimiento se envía sin falta.
+El sistema no depende de la memoria ni de recordatorios en el calendario. Cada email enviado tiene un recordatorio calculado automáticamente. Si no hay respuesta, el seguimiento se envía sin falta.
 
 ### 🧠 Adaptación inteligente por nivel de contacto
-No todos los contactos requieren el mismo ritmo. Un perfil "Blue" puede recibir un seguimiento en 24h; un "VIP" merece más paciencia — 96h. El agente aplica estas reglas automáticamente según la categoría asignada.
+No todos los contactos requieren el mismo ritmo. Un perfil "Blue" puede recibir un seguimiento en 24h; un "VIP" merece más paciencia — 96h. El agente aplica estas reglas automáticamente.
 
 ### 🔄 Reprogramación automática por etiquetas
 Si un contacto responde "contestar después de 2 días" o "al final del día", el agente detecta esa instrucción y reprograma el recordatorio solo. Sin acción humana.
 
 ### 🔒 Privacidad y control total
-Todo corre en local. Las credenciales están cifradas. Los emails no pasan por ningún intermediario. El profesional tiene control total sobre sus datos.
+La contraseña del usuario **nunca la ve el agente** — se introduce directamente en la web de Microsoft. El refresh token OAuth2 se almacena cifrado localmente. Todo corre en local.
 
 ### 📊 Visibilidad en tiempo real
-El dashboard muestra en todo momento cuántos emails están pendientes de respuesta, cuáles tienen recordatorio próximo, y un historial de toda la actividad. No hay más incertidumbre sobre el estado de las conversaciones.
+El dashboard muestra en todo momento cuántos emails están pendientes de respuesta, cuáles tienen recordatorio próximo, y un historial completo de actividad con auto-refresh cada 30 segundos.
 
 ### 🚀 Instalación en minutos
-No requiere Azure, OAuth, APIs de pago ni configuración en la nube. Instalar Python, clonar el repositorio, ejecutar `python run.py`, introducir email y contraseña — y el agente está operativo.
+Instalar Python, clonar el repositorio, ejecutar `python run.py`, registrar la app en Azure (5 min, gratis), iniciar sesión con Microsoft — y el agente está operativo.
 
 ---
 
 ## Enlace al agente
 
-📦 **Repositorio GitHub:**
+�� **Repositorio GitHub:**  
 [https://github.com/amartii/outlook-smart-reminder-system](https://github.com/amartii/outlook-smart-reminder-system)
 
-📄 **Documentación técnica:**
+📄 **Documentación técnica:**  
 [DOCUMENTATION.md](https://github.com/amartii/outlook-smart-reminder-system/blob/main/DOCUMENTATION.md)
 
-🚀 **Guía de instalación paso a paso:**
+🚀 **Guía de instalación paso a paso:**  
 [SETUP.md](https://github.com/amartii/outlook-smart-reminder-system/blob/main/SETUP.md)
