@@ -1,11 +1,14 @@
 """
 scheduler.py
-APScheduler jobs:
-  - check_replies_job: polls Gmail IMAP every 30 min for replies
-  - send_followups_job: daily job that sends follow-ups to non-responders
+APScheduler background jobs for Outlook Smart Reminder System.
+
+Jobs:
+  - sync_contacts_job    : sync Outlook contacts every 6h
+  - check_responses_job  : check for email replies every 15min
+  - send_reminders_job   : fire pending reminders every 1h
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -13,150 +16,178 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="UTC")
 
 
-def check_replies_job(app):
-    """Check Gmail inbox for replies to sent emails and update contact status."""
+def _build_outlook_service(app):
+    """
+    Build an OutlookService instance from the active OutlookConnection in the DB.
+    Returns None if no active connection is configured.
+    """
+    from app.models import OutlookConnection
+    from app.outlook_service import OutlookService
+    from app.crypto import decrypt
+
+    conn = OutlookConnection.query.filter_by(is_active=True).first()
+    if not conn:
+        logger.debug("No active Outlook connection — skipping job")
+        return None
+
+    client_secret = decrypt(conn.client_secret_enc)
+    return OutlookService(conn.tenant_id, conn.client_id, client_secret, conn.user_email)
+
+
+def sync_contacts_job(app):
+    """
+    Sync contacts from Outlook into the local DB.
+    Creates new Contact records; updates existing ones by email (upsert).
+    """
     with app.app_context():
         from app import db
-        from app.models import Campaign, Contact
-        from app.email_service import check_replies
-        from app.excel_service import update_contact_status
-        from app.crypto import decrypt
+        from app.models import Contact
 
-        campaign = Campaign.query.filter_by(status="running").first()
-        if not campaign:
-            return
-
-        contacts = Contact.query.filter_by(
-            campaign_id=campaign.id, status="sent"
-        ).all()
-        if not contacts:
-            return
-
-        message_ids = [c.message_id for c in contacts if c.message_id]
-        if not message_ids:
+        svc = _build_outlook_service(app)
+        if not svc:
             return
 
         try:
-            password = decrypt(campaign.sender_password_enc)
-            replied_ids = check_replies(campaign.sender_email, password, message_ids)
+            contacts_data = svc.sync_contacts()
         except Exception as exc:
-            logger.error("check_replies_job error: %s", exc)
+            logger.error("sync_contacts_job error: %s", exc)
             return
 
-        now = datetime.utcnow()
-        for contact in contacts:
-            if contact.message_id in replied_ids:
-                contact.status = "replied"
-                contact.replied_at = now
-                try:
-                    update_contact_status(
-                        campaign.excel_path,
-                        contact.email,
-                        "replied",
-                        email_col=_get_email_col(campaign),
-                        replied_at=now,
-                    )
-                except Exception as exc:
-                    logger.warning("Excel update failed for %s: %s", contact.email, exc)
+        new_count = 0
+        for c in contacts_data:
+            if not c.get("email"):
+                continue
+            existing = Contact.query.filter_by(email=c["email"]).first()
+            if existing:
+                existing.display_name = c["display_name"] or existing.display_name
+                existing.job_title = c["job_title"] or existing.job_title
+                existing.company_name = c["company_name"] or existing.company_name
+                existing.outlook_id = c["outlook_id"] or existing.outlook_id
+                existing.updated_at = datetime.utcnow()
+            else:
+                db.session.add(Contact(
+                    email=c["email"],
+                    display_name=c["display_name"],
+                    job_title=c["job_title"],
+                    company_name=c["company_name"],
+                    outlook_id=c["outlook_id"],
+                ))
+                new_count += 1
 
         db.session.commit()
-        logger.info("Reply check done. %d replies found.", len(replied_ids))
+        logger.info("sync_contacts_job: %d new contacts imported (%d total)", new_count, len(contacts_data))
 
 
-def send_followups_job(app):
-    """Send follow-up emails to contacts who haven't replied after N days."""
+def check_responses_job(app):
+    """
+    Check all pending SentEmails for replies via Graph API conversation tracking.
+    If a reply is detected, updates status and parses response labels to reschedule.
+    """
     with app.app_context():
         from app import db
-        from app.models import Campaign, Contact
-        from app.email_service import send_email, render_template
-        from app.excel_service import update_contact_status
-        from app.crypto import decrypt
+        from app.models import SentEmail
+        from app.outlook_service import OutlookService
+        from app.category_manager import CategoryManager
 
-        campaign = Campaign.query.filter_by(status="running").first()
-        if not campaign or not campaign.followup_body_html:
+        svc = _build_outlook_service(app)
+        if not svc:
             return
 
-        cutoff = datetime.utcnow() - timedelta(days=campaign.followup_days)
-        contacts = Contact.query.filter(
-            Contact.campaign_id == campaign.id,
-            Contact.status == "sent",
-            Contact.email_sent_at <= cutoff,
+        pending = SentEmail.query.filter(
+            SentEmail.status.in_(["pending", "snoozed"]),
+            SentEmail.conversation_id.isnot(None),
+            SentEmail.replied_at.is_(None),
         ).all()
 
-        if not contacts:
+        if not pending:
             return
 
-        try:
-            password = decrypt(campaign.sender_password_enc)
-        except Exception as exc:
-            logger.error("Decrypt failed in send_followups_job: %s", exc)
-            return
-
-        now = datetime.utcnow()
-        for contact in contacts:
-            variables = {"nombre": contact.name, **(contact.custom_fields or {})}
-            subject = render_template(campaign.followup_subject or "", variables)
-            body_html = render_template(campaign.followup_body_html or "", variables)
-            body_text = render_template(campaign.followup_body_text or "", variables)
-
+        replied_count = 0
+        for se in pending:
             try:
-                send_email(
-                    campaign.sender_email,
-                    password,
-                    contact.email,
-                    subject,
-                    body_html,
-                    body_text,
-                    reply_to_message_id=contact.message_id,
-                )
-                contact.status = "followup_sent"
-                contact.followup_sent_at = now
-                try:
-                    update_contact_status(
-                        campaign.excel_path,
-                        contact.email,
-                        "followup_sent",
-                        email_col=_get_email_col(campaign),
-                        followup_sent_at=now,
-                    )
-                except Exception as exc:
-                    logger.warning("Excel update failed for %s: %s", contact.email, exc)
+                has_reply, replied_at, body = svc.has_reply(se.conversation_id, se.sent_at)
+                if not has_reply:
+                    continue
+
+                se.replied_at = replied_at or datetime.utcnow()
+                se.status = "replied"
+                replied_count += 1
+                logger.info("Reply detected for SentEmail %d", se.id)
+
+                # Check if reply contains a snooze/reschedule label
+                label = OutlookService.detect_response_labels(body or "")
+                if label:
+                    logger.info("Label '%s' found in reply for SentEmail %d", label, se.id)
+                    CategoryManager.process_response_label(se.id, label)
+
             except Exception as exc:
-                logger.error("Follow-up send failed for %s: %s", contact.email, exc)
+                logger.error("check_responses_job error for SentEmail %d: %s", se.id, exc)
 
         db.session.commit()
-        logger.info("Follow-up job done. %d follow-ups sent.", len(contacts))
+        logger.info("check_responses_job complete — %d replies detected", replied_count)
 
 
-def _get_email_col(campaign) -> str:
-    """Return the email column name stored in the campaign, defaulting to 'Email'."""
-    return getattr(campaign, "email_col", None) or "Email"
+def send_reminders_job(app):
+    """
+    Find and send all reminders that are due right now.
+    """
+    with app.app_context():
+        from app.reminder_engine import ReminderEngine
+
+        svc = _build_outlook_service(app)
+        if not svc:
+            return
+
+        due = ReminderEngine.get_pending_reminders()
+        if not due:
+            return
+
+        sent_count = 0
+        for se in due:
+            if ReminderEngine.send_reminder(se.id, svc):
+                sent_count += 1
+
+        logger.info("send_reminders_job complete — %d reminders sent", sent_count)
 
 
 def start_scheduler(app):
-    """Initialize and start the background scheduler with the Flask app context."""
-    interval_check = app.config.get("REPLY_CHECK_INTERVAL", 1800)
-    interval_followup = app.config.get("FOLLOWUP_CHECK_INTERVAL", 86400)
+    """
+    Register all jobs and start the APScheduler background scheduler.
+    Intervals are read from app config so they can be overridden via env vars.
+    """
+    sync_hours = app.config.get("SYNC_CONTACTS_INTERVAL_HOURS", 6)
+    check_minutes = app.config.get("CHECK_RESPONSES_INTERVAL_MINUTES", 15)
+    reminder_hours = app.config.get("SEND_REMINDERS_INTERVAL_HOURS", 1)
 
     scheduler.add_job(
-        func=check_replies_job,
+        func=sync_contacts_job,
         args=[app],
         trigger="interval",
-        seconds=interval_check,
-        id="check_replies",
+        hours=sync_hours,
+        id="sync_contacts",
         replace_existing=True,
     )
-
     scheduler.add_job(
-        func=send_followups_job,
+        func=check_responses_job,
         args=[app],
         trigger="interval",
-        seconds=interval_followup,
-        id="send_followups",
+        minutes=check_minutes,
+        id="check_responses",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        func=send_reminders_job,
+        args=[app],
+        trigger="interval",
+        hours=reminder_hours,
+        id="send_reminders",
         replace_existing=True,
     )
 
     if not scheduler.running:
         scheduler.start()
-        logger.info("Scheduler started (reply check every %ds, follow-up every %ds)",
-                    interval_check, interval_followup)
+        logger.info(
+            "Scheduler started — sync_contacts(%dh), check_responses(%dmin), send_reminders(%dh)",
+            sync_hours, check_minutes, reminder_hours,
+        )
+
