@@ -1,10 +1,10 @@
 # > Outlook Smart Reminder System
 
-**Accenture Internal Tool** — Sistema inteligente de seguimiento y recordatorios de emails basado en Microsoft Graph API.
+**Accenture Internal Tool** — Agente de seguimiento inteligente de emails para Outlook / Office 365.
 
-Conecta con **Office 365 / Outlook** directamente, asigna categorías a contactos (Blue, Manager, Senior Manager, VIP) y envía recordatorios automáticos si no hay respuesta en el plazo configurado. Detecta etiquetas en las respuestas ("contestar en 2 días", "al final del día") para reprogramar el recordatorio de forma inteligente. Incluye un dashboard en tiempo real con estadísticas, recordatorios pendientes y timeline de actividad.
+Conecta directamente con tu cuenta de Outlook corporativa usando tus credenciales habituales. Asigna categorías a contactos (Blue, Manager, Senior Manager, VIP), envía recordatorios automáticos si no hay respuesta en el plazo configurado, y detecta etiquetas en las respuestas ("contestar en 2 días", "al final del día") para reprogramar el recordatorio. Todo corre en local — sin servicios externos ni configuración en la nube.
 
 ---
 
 📄 **[DOCUMENTATION.md](DOCUMENTATION.md)** — Arquitectura, modelos, servicios, API y tecnologías  
-🚀 **[SETUP.md](SETUP.md)** — Guía paso a paso para instalar, configurar Azure AD y desplegar
+🚀 **[SETUP.md](SETUP.md)** — Guía paso a paso para instalar y poner en marcha el agente
