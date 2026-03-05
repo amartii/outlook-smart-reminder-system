@@ -7,16 +7,24 @@ from app import db
 
 
 class OutlookConnection(db.Model):
-    """Stores Azure AD credentials for Microsoft Graph API access."""
+    """Stores email credentials (SMTP/IMAP) for the sending mailbox."""
 
     __tablename__ = "outlook_connections"
 
     id = db.Column(db.Integer, primary_key=True)
-    tenant_id = db.Column(db.String(200), nullable=False)
-    client_id = db.Column(db.String(200), nullable=False)
-    client_secret_enc = db.Column(db.Text, nullable=False)  # encrypted with Fernet
-    user_email = db.Column(db.String(200), nullable=False)  # mailbox used for sending
+    # backend_type: 'smtp' (default) or 'graph' (legacy Azure AD)
+    backend_type = db.Column(db.String(20), default="smtp", nullable=False)
+    user_email = db.Column(db.String(200), nullable=False)   # sender address
     display_name = db.Column(db.String(200))
+    password_enc = db.Column(db.Text, nullable=False)        # encrypted with Fernet
+    smtp_host = db.Column(db.String(200), default="smtp.office365.com")
+    smtp_port = db.Column(db.Integer, default=587)
+    imap_host = db.Column(db.String(200), default="outlook.office365.com")
+    imap_port = db.Column(db.Integer, default=993)
+    # Legacy Azure AD fields (kept for compatibility, nullable)
+    tenant_id = db.Column(db.String(200))
+    client_id = db.Column(db.String(200))
+    client_secret_enc = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -25,10 +33,13 @@ class OutlookConnection(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
-            "tenant_id": self.tenant_id,
-            "client_id": self.client_id,
+            "backend_type": self.backend_type,
             "user_email": self.user_email,
             "display_name": self.display_name,
+            "smtp_host": self.smtp_host,
+            "smtp_port": self.smtp_port,
+            "imap_host": self.imap_host,
+            "imap_port": self.imap_port,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

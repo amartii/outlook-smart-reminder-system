@@ -17,21 +17,25 @@ scheduler = BackgroundScheduler(timezone="UTC")
 
 
 def _build_outlook_service(app):
-    """
-    Build an OutlookService instance from the active OutlookConnection in the DB.
-    Returns None if no active connection is configured.
-    """
+    """Build an SMTPService from the active connection. Returns None if not configured."""
     from app.models import OutlookConnection
-    from app.outlook_service import OutlookService
+    from app.smtp_service import SMTPService
     from app.crypto import decrypt
 
     conn = OutlookConnection.query.filter_by(is_active=True).first()
     if not conn:
-        logger.debug("No active Outlook connection — skipping job")
+        logger.debug("No active connection — skipping job")
         return None
 
-    client_secret = decrypt(conn.client_secret_enc)
-    return OutlookService(conn.tenant_id, conn.client_id, client_secret, conn.user_email)
+    return SMTPService(
+        smtp_host=conn.smtp_host,
+        smtp_port=conn.smtp_port,
+        imap_host=conn.imap_host,
+        imap_port=conn.imap_port,
+        username=conn.user_email,
+        password=decrypt(conn.password_enc),
+        sender_email=conn.user_email,
+    )
 
 
 def sync_contacts_job(app):

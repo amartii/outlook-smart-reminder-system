@@ -1,221 +1,172 @@
 {% extends "base.html" %}
 {% block title %}Configuración — Outlook Smart Reminder{% endblock %}
-{% block nav_setup %}active{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center mt-4">
-<div class="col-12 col-md-10 col-lg-7">
+<div class="container py-5" style="max-width:520px">
 
-<div class="mb-4">
-    <h1 class="ac-page-title"><span>></span> Configuración</h1>
-    <p class="ac-page-subtitle">Conecta tu cuenta de Microsoft 365 mediante Azure Active Directory.</p>
-</div>
+  <!-- Header -->
+  <div class="mb-5">
+    <p class="text-accent fw-bold mb-1 small text-uppercase tracking-wide">> Configuración inicial</p>
+    <h1 class="fw-black display-6 mb-1">Conectar cuenta<br>de Outlook</h1>
+    <p class="text-muted small">Introduce tus credenciales de Outlook / Office 365.<br>
+      El agente correrá en local y usará tu cuenta para enviar y monitorizar emails.</p>
+  </div>
 
-{% if connection and connection.is_active %}
-<div class="alert alert-success mb-4">
-    <i class="bi bi-check-circle-fill me-2"></i>
-    <strong>Conectado:</strong> {{ connection.user_email }}
-    {% if connection.display_name %} — {{ connection.display_name }}{% endif %}
-    <button class="btn btn-sm ms-3" style="border:1px solid #005A2B;color:#005A2B;border-radius:0;font-size:0.75rem;font-weight:600;" onclick="disconnectOutlook()">
-        Desconectar
-    </button>
-</div>
-{% endif %}
+  <!-- Status banner si ya hay conexión -->
+  {% if connection %}
+  <div class="alert-accenture mb-4 d-flex align-items-center gap-3">
+    <span style="font-size:1.4rem">✓</span>
+    <div>
+      <div class="fw-bold">Cuenta conectada</div>
+      <div class="small text-muted">{{ connection.user_email }}</div>
+    </div>
+    <button class="btn btn-sm btn-outline-danger ms-auto" onclick="disconnect()">Desconectar</button>
+  </div>
+  {% endif %}
 
-<div class="ac-setup-card">
+  <!-- Formulario -->
+  <form id="setupForm" autocomplete="off">
 
-    <!-- Step bar -->
-    <div class="ac-step-bar mb-4">
-        <div class="ac-step-seg done"   id="seg1"></div>
-        <div class="ac-step-seg"        id="seg2"></div>
-        <div class="ac-step-seg"        id="seg3"></div>
+    <div class="mb-4">
+      <label class="form-label fw-bold small text-uppercase">Email de Outlook</label>
+      <input type="email" id="user_email" class="form-control form-control-lg"
+             placeholder="tunombre@empresa.com"
+             value="{{ connection.user_email if connection else '' }}" required>
+      <div class="form-text">La cuenta desde la que se enviarán los emails.</div>
     </div>
 
-    <form id="setupForm" autocomplete="off">
-        <!-- Step 1: Azure credentials -->
-        <div id="step1">
-            <h5 class="fw-700 mb-1" style="font-size:1rem;">Credenciales Azure AD</h5>
-            <p class="ac-page-subtitle mb-4" style="margin-top:0.25rem;">
-                Obtén estos valores en <a href="https://portal.azure.com" target="_blank" style="color:var(--ac-purple);">portal.azure.com</a> → App Registrations.
-            </p>
-
-            <div class="mb-3">
-                <label class="form-label">Tenant ID</label>
-                <input type="text" class="form-control" name="tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                       value="{{ connection.tenant_id if connection else '' }}" required>
-                <div class="form-text">Azure Active Directory → Overview → Directory (tenant) ID</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Client ID (Application ID)</label>
-                <input type="text" class="form-control" name="client_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                       value="{{ connection.client_id if connection else '' }}" required>
-                <div class="form-text">App Registrations → tu app → Application (client) ID</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Client Secret</label>
-                <input type="password" class="form-control" name="client_secret" placeholder="Valor del secreto (solo visible al crearlo)" required>
-                <div class="form-text">Certificates & secrets → New client secret → copiar el valor</div>
-            </div>
-
-            <div class="d-flex gap-2 mt-4">
-                <button type="button" class="btn btn-ac-outline" onclick="nextStep(2)">
-                    Siguiente <i class="bi bi-arrow-right ms-1"></i>
-                </button>
-            </div>
-        </div>
-
-        <!-- Step 2: Mailbox -->
-        <div id="step2" class="d-none">
-            <h5 class="fw-700 mb-1" style="font-size:1rem;">Buzón de correo</h5>
-            <p class="ac-page-subtitle mb-4" style="margin-top:0.25rem;">
-                Email de la cuenta desde la que se enviarán los recordatorios.
-            </p>
-
-            <div class="mb-3">
-                <label class="form-label">Email de la cuenta Outlook / Microsoft 365</label>
-                <input type="email" class="form-control" name="user_email" placeholder="usuario@empresa.com"
-                       value="{{ connection.user_email if connection else '' }}" required>
-                <div class="form-text">Debe pertenecer al tenant configurado. Necesita permisos Mail.Send y Mail.Read.</div>
-            </div>
-
-            <div class="alert alert-info mb-4" style="font-size:0.82rem;">
-                <i class="bi bi-info-circle me-2"></i>
-                <strong>Permisos necesarios en Azure AD:</strong>
-                Mail.Send · Mail.Read · Contacts.Read · User.Read.All<br>
-                <span style="color:var(--ac-gray);">Asegúrate de que el administrador ha dado consentimiento (<em>Grant admin consent</em>).</span>
-            </div>
-
-            <div class="d-flex gap-2 mt-4">
-                <button type="button" class="btn btn-ac-outline" onclick="nextStep(1)">
-                    <i class="bi bi-arrow-left me-1"></i> Atrás
-                </button>
-                <button type="button" class="btn btn-ac-outline-purple" id="btnTest" onclick="testConnection()">
-                    <i class="bi bi-plug me-1"></i> Probar conexión
-                </button>
-            </div>
-        </div>
-
-        <!-- Step 3: Confirm -->
-        <div id="step3" class="d-none">
-            <h5 class="fw-700 mb-1" style="font-size:1rem;">Confirmar y guardar</h5>
-            <p class="ac-page-subtitle mb-4" style="margin-top:0.25rem;">
-                Conexión verificada correctamente.
-            </p>
-
-            <div class="alert alert-success mb-4" id="testResult"></div>
-
-            <div class="d-flex gap-2 mt-4">
-                <button type="button" class="btn btn-ac-outline" onclick="nextStep(2)">
-                    <i class="bi bi-arrow-left me-1"></i> Atrás
-                </button>
-                <button type="submit" class="btn btn-ac-primary" id="btnSave">
-                    <i class="bi bi-check-lg me-1"></i> Guardar conexión
-                </button>
-            </div>
-        </div>
-    </form>
-</div>
-
-<!-- Azure AD setup guide -->
-<div class="card mt-4">
-    <div class="card-header"><i class="bi bi-book me-2"></i>Guía rápida — Registro en Azure AD</div>
-    <div class="card-body" style="font-size:0.85rem;">
-        <ol class="mb-0" style="line-height:2;">
-            <li>Ve a <a href="https://portal.azure.com" target="_blank" style="color:var(--ac-purple);">portal.azure.com</a> → <strong>Azure Active Directory</strong> → <strong>App registrations</strong> → <strong>New registration</strong></li>
-            <li>Name: <code>Outlook Smart Reminder</code> — Supported account types: <em>Single tenant</em></li>
-            <li>Copia <strong>Application (client) ID</strong> y <strong>Directory (tenant) ID</strong></li>
-            <li><strong>Certificates &amp; secrets</strong> → <strong>New client secret</strong> → copia el valor (solo visible una vez)</li>
-            <li><strong>API permissions</strong> → Add → Microsoft Graph → <strong>Application permissions</strong>:<br>
-                <code>Mail.Send</code> · <code>Mail.Read</code> · <code>Contacts.Read</code> · <code>User.Read.All</code>
-            </li>
-            <li>Haz clic en <strong>Grant admin consent</strong></li>
-        </ol>
+    <div class="mb-4">
+      <label class="form-label fw-bold small text-uppercase">Contraseña</label>
+      <div class="input-group">
+        <input type="password" id="password" class="form-control form-control-lg"
+               placeholder="••••••••••••" required>
+        <button class="btn btn-outline-secondary" type="button" onclick="togglePass()">
+          <span id="passIcon">👁</span>
+        </button>
+      </div>
+      <div class="form-text">
+        Si tienes verificación en dos pasos activa, genera una
+        <a href="https://account.microsoft.com/security" target="_blank" class="text-accent">
+          contraseña de aplicación
+        </a>
+        y úsala aquí.
+      </div>
     </div>
-</div>
+
+    <!-- Configuración avanzada (colapsable) -->
+    <div class="mb-4">
+      <button class="btn btn-link text-muted p-0 small" type="button"
+              data-bs-toggle="collapse" data-bs-target="#advancedConfig">
+        ▸ Configuración avanzada (SMTP / IMAP)
+      </button>
+      <div class="collapse mt-3" id="advancedConfig">
+        <div class="card card-body bg-light border-0" style="border-radius:0">
+          <div class="row g-3">
+            <div class="col-8">
+              <label class="form-label small fw-bold">Servidor SMTP</label>
+              <input type="text" id="smtp_host" class="form-control form-control-sm"
+                     value="smtp.office365.com">
+            </div>
+            <div class="col-4">
+              <label class="form-label small fw-bold">Puerto</label>
+              <input type="number" id="smtp_port" class="form-control form-control-sm" value="587">
+            </div>
+            <div class="col-8">
+              <label class="form-label small fw-bold">Servidor IMAP</label>
+              <input type="text" id="imap_host" class="form-control form-control-sm"
+                     value="outlook.office365.com">
+            </div>
+            <div class="col-4">
+              <label class="form-label small fw-bold">Puerto</label>
+              <input type="number" id="imap_port" class="form-control form-control-sm" value="993">
+            </div>
+          </div>
+          <div class="mt-2 text-muted" style="font-size:.8rem">
+            Los valores por defecto son para Outlook / Office 365.<br>
+            Para Gmail: smtp.gmail.com:587 / imap.gmail.com:993
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Acciones -->
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">
+        Probar conexión
+      </button>
+      <button type="submit" class="btn btn-accenture flex-grow-1">
+        Guardar y conectar
+      </button>
+    </div>
+
+    <div id="feedback" class="mt-3" style="display:none"></div>
+  </form>
 
 </div>
-</div>
-{% endblock %}
 
-{% block scripts %}
 <script>
-let currentStep = 1;
+function togglePass() {
+  const inp = document.getElementById('password');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
 
-function nextStep(n) {
-    document.getElementById('step' + currentStep).classList.add('d-none');
-    document.getElementById('step' + n).classList.remove('d-none');
-    // Update step bar
-    for (let i = 1; i <= 3; i++) {
-        const seg = document.getElementById('seg' + i);
-        if (i < n)  seg.className = 'ac-step-seg done';
-        else if (i === n) seg.className = 'ac-step-seg active';
-        else seg.className = 'ac-step-seg';
-    }
-    currentStep = n;
+function getFormData() {
+  return {
+    user_email: document.getElementById('user_email').value.trim(),
+    password:   document.getElementById('password').value,
+    smtp_host:  document.getElementById('smtp_host').value.trim(),
+    smtp_port:  parseInt(document.getElementById('smtp_port').value),
+    imap_host:  document.getElementById('imap_host').value.trim(),
+    imap_port:  parseInt(document.getElementById('imap_port').value),
+  };
+}
+
+function showFeedback(ok, msg) {
+  const el = document.getElementById('feedback');
+  el.style.display = 'block';
+  el.className = ok ? 'alert alert-success' : 'alert alert-danger';
+  el.textContent = msg;
 }
 
 async function testConnection() {
-    const form = document.getElementById('setupForm');
-    const btn  = document.getElementById('btnTest');
-    const payload = {
-        tenant_id:     form.querySelector('[name=tenant_id]').value.trim(),
-        client_id:     form.querySelector('[name=client_id]').value.trim(),
-        client_secret: form.querySelector('[name=client_secret]').value.trim(),
-        user_email:    form.querySelector('[name=user_email]').value.trim(),
-    };
-    if (!payload.tenant_id || !payload.client_id || !payload.client_secret || !payload.user_email) {
-        showAlert('Rellena todos los campos antes de probar la conexión.', 'warning'); return;
-    }
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Probando...';
-    try {
-        const res  = await fetch('/api/outlook/test', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        const data = await res.json();
-        if (data.ok) {
-            document.getElementById('testResult').innerHTML = '<i class="bi bi-check-circle-fill me-2"></i>' + data.message;
-            nextStep(3);
-        } else {
-            showAlert(data.message || 'Error de conexión', 'danger');
-        }
-    } catch(e) { showAlert('Error: ' + e.message, 'danger'); }
-    finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-plug me-1"></i> Probar conexión';
-    }
+  const data = getFormData();
+  if (!data.user_email || !data.password) { showFeedback(false, 'Rellena email y contraseña'); return; }
+  showFeedback(null, 'Probando conexión…');
+  document.getElementById('feedback').className = 'alert alert-info';
+  const res = await fetch('/api/outlook/test', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+  });
+  const json = await res.json();
+  showFeedback(json.ok, json.message);
 }
 
 document.getElementById('setupForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const btn  = document.getElementById('btnSave');
-    const payload = {
-        tenant_id:     form.querySelector('[name=tenant_id]').value.trim(),
-        client_id:     form.querySelector('[name=client_id]').value.trim(),
-        client_secret: form.querySelector('[name=client_secret]').value.trim(),
-        user_email:    form.querySelector('[name=user_email]').value.trim(),
-    };
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
-    try {
-        const res  = await fetch('/api/outlook/connect', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        const data = await res.json();
-        if (res.ok) {
-            showAlert('Conexión guardada correctamente.', 'success');
-            setTimeout(() => window.location.href = '/dashboard', 1200);
-        } else {
-            showAlert(data.error || 'Error al guardar', 'danger');
-        }
-    } catch(e) { showAlert('Error: ' + e.message, 'danger'); }
-    finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar conexión';
+  e.preventDefault();
+  const data = getFormData();
+  const btn = e.submitter;
+  btn.disabled = true;
+  btn.textContent = 'Conectando…';
+  try {
+    const res = await fetch('/api/outlook/connect', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    const json = await res.json();
+    if (res.ok) {
+      showFeedback(true, json.message + ' — redirigiendo…');
+      setTimeout(() => window.location.href = '/dashboard', 1200);
+    } else {
+      showFeedback(false, json.error || 'Error al conectar');
     }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar y conectar';
+  }
 });
 
-async function disconnectOutlook() {
-    if (!confirm('¿Desconectar la cuenta de Outlook?')) return;
-    await fetch('/api/outlook/disconnect', { method:'POST' });
-    window.location.reload();
+async function disconnect() {
+  if (!confirm('¿Desconectar la cuenta actual?')) return;
+  await fetch('/api/outlook/disconnect', { method: 'POST' });
+  window.location.reload();
 }
 </script>
 {% endblock %}

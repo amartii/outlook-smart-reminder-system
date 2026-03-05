@@ -19,8 +19,18 @@ def _get_active_connection():
 
 
 def _build_service(conn):
-    from app.outlook_service import OutlookService
-    return OutlookService(conn.tenant_id, conn.client_id, decrypt(conn.client_secret_enc), conn.user_email)
+    """Build the appropriate email service from the active connection."""
+    from app.smtp_service import SMTPService
+    from app.crypto import decrypt
+    return SMTPService(
+        smtp_host=conn.smtp_host,
+        smtp_port=conn.smtp_port,
+        imap_host=conn.imap_host,
+        imap_port=conn.imap_port,
+        username=conn.user_email,
+        password=decrypt(conn.password_enc),
+        sender_email=conn.user_email,
+    )
 
 
 # ── Pages ──────────────────────────────────────────────────────────────────────
@@ -57,35 +67,55 @@ def dashboard():
 
 @main.route("/api/outlook/test", methods=["POST"])
 def api_outlook_test():
-    from app.outlook_service import OutlookService
+    from app.smtp_service import SMTPService
     data = request.get_json() or {}
-    for f in ["tenant_id", "client_id", "client_secret", "user_email"]:
+    for f in ["user_email", "password"]:
         if not data.get(f):
             return jsonify({"ok": False, "message": f"Campo requerido: {f}"}), 400
-    svc = OutlookService(data["tenant_id"].strip(), data["client_id"].strip(), data["client_secret"].strip(), data["user_email"].strip())
+    svc = SMTPService(
+        smtp_host=data.get("smtp_host", "smtp.office365.com"),
+        smtp_port=int(data.get("smtp_port", 587)),
+        imap_host=data.get("imap_host", "outlook.office365.com"),
+        imap_port=int(data.get("imap_port", 993)),
+        username=data["user_email"].strip(),
+        password=data["password"].strip(),
+    )
     ok, message = svc.validate_connection()
     return jsonify({"ok": ok, "message": message})
 
 
 @main.route("/api/outlook/connect", methods=["POST"])
 def api_outlook_connect():
-    from app.outlook_service import OutlookService
+    from app.smtp_service import SMTPService
     from app.category_manager import CategoryManager
     data = request.get_json() or {}
-    for f in ["tenant_id", "client_id", "client_secret", "user_email"]:
+    for f in ["user_email", "password"]:
         if not data.get(f):
             return jsonify({"error": f"Campo requerido: {f}"}), 400
-    tenant_id, client_id = data["tenant_id"].strip(), data["client_id"].strip()
-    client_secret, user_email = data["client_secret"].strip(), data["user_email"].strip().lower()
-    svc = OutlookService(tenant_id, client_id, client_secret, user_email)
+
+    email = data["user_email"].strip().lower()
+    password = data["password"].strip()
+    smtp_host = data.get("smtp_host", "smtp.office365.com").strip()
+    smtp_port = int(data.get("smtp_port", 587))
+    imap_host = data.get("imap_host", "outlook.office365.com").strip()
+    imap_port = int(data.get("imap_port", 993))
+
+    svc = SMTPService(smtp_host, smtp_port, imap_host, imap_port, email, password)
     ok, message = svc.validate_connection()
     if not ok:
         return jsonify({"error": message}), 400
+
     OutlookConnection.query.update({"is_active": False})
     db.session.flush()
-    display = message.split("como ")[-1].split(" (")[0] if "como " in message else user_email
-    conn = OutlookConnection(tenant_id=tenant_id, client_id=client_id, client_secret_enc=encrypt(client_secret),
-                             user_email=user_email, display_name=display, is_active=True)
+    conn = OutlookConnection(
+        backend_type="smtp",
+        user_email=email,
+        display_name=data.get("display_name", "").strip() or email,
+        password_enc=encrypt(password),
+        smtp_host=smtp_host, smtp_port=smtp_port,
+        imap_host=imap_host, imap_port=imap_port,
+        is_active=True,
+    )
     db.session.add(conn)
     db.session.commit()
     CategoryManager.seed_default_categories()
